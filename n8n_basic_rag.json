@@ -1,0 +1,345 @@
+{
+  "name": "Test flow - Chain Router RAG",
+  "nodes": [
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1808,
+        96
+      ],
+      "id": "eec92aa6-3048-4eb3-a2ad-7a1ca8450662",
+      "name": "When chat message received",
+      "webhookId": "03990c03-2c0c-4e79-b3db-0428c0ae39a8"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "3446ec83-667c-4b29-9782-36a55ac08c49",
+              "name": "response.text",
+              "value": "={{ $json.output }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -720,
+        80
+      ],
+      "id": "09bf630a-3159-4b20-be29-055ef1a78ce8",
+      "name": "RAG Agent Response"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "You are a smart assistant with access to a Knowledge Base.\n\n**INSTRUCTIONS:**\n1. If the user asks to list documents (e.g., \"what files are there?\", \"which documents are in the knowledgebase?\"), use `list_documents`.\n2. If the user asks about a topic, use `search_knowledgebase`.\n3. If the user asks about a specific file, use `list_documents` to find the ID, then `get_file_contents`.\n\n**RULE:**\n- Do not describe your plan.\n- If a tool is needed, output the JSON tool call immediately.\n- After the tool runs, answer the user in text.",
+        "options": {
+          "maxIterations": 3,
+          "returnIntermediateSteps": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        -1504,
+        80
+      ],
+      "id": "8f1b38f6-ddc8-458d-aa8c-00a778c40ce9",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {},
+      "id": "b961c910-d7cb-45ec-8f2a-823b2e075de1",
+      "name": "Postgres Chat Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1,
+      "position": [
+        -1504,
+        384
+      ],
+      "notesInFlow": false,
+      "credentials": {
+        "postgres": {
+          "id": "VxjNZ8aVk0j4opgg",
+          "name": "Postgres account"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "List available documents and metadata, or resolve a document title/name to its id and sheet_name.",
+        "operation": "select",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "document_metadata",
+          "mode": "list",
+          "cachedResultName": "document_metadata"
+        },
+        "returnAll": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgresTool",
+      "typeVersion": 2.5,
+      "position": [
+        -1360,
+        384
+      ],
+      "id": "d79dd960-2ab5-4757-a7dd-753560566f7f",
+      "name": "List Documents",
+      "credentials": {
+        "postgres": {
+          "id": "VxjNZ8aVk0j4opgg",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Given a file_id, return the document text. Use after resolving a specific named document with List Documents.",
+        "operation": "executeQuery",
+        "query": "SELECT\n  string_agg(text, ' ') AS document_text\nFROM documents_pg\nWHERE metadata->>'file_id' IN ($1, '/files/' || $1)\nGROUP BY metadata->>'file_id';",
+        "options": {
+          "queryReplacement": "={{ $fromAI('file_id') }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgresTool",
+      "typeVersion": 2.5,
+      "position": [
+        -1216,
+        384
+      ],
+      "id": "44a22e31-5de6-40a5-b7e2-d31e0859e704",
+      "name": "Get File Contents",
+      "credentials": {
+        "postgres": {
+          "id": "VxjNZ8aVk0j4opgg",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "=Generate a Postgres SQL query for table 'document_rows' which contains JSON spreadsheet data.\nTable Schema:\n- dataset_id (TEXT): The file name.\n- sheet_name (TEXT)\n- row_data (JSONB): Contains the spreadsheet rows.\n\nQuery Rules:\n- usage: FROM document_rows, jsonb_array_elements(row_data -> 'data') AS data_elements\n- filter: WHERE dataset_id = '...'\n- casting: data_elements->>'column' must be cast ::numeric for math.",
+        "operation": "executeQuery",
+        "query": "{{ $fromAI('sql_query') }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgresTool",
+      "typeVersion": 2.5,
+      "position": [
+        -1056,
+        384
+      ],
+      "id": "35c50fe2-654a-4e80-8034-948c771533da",
+      "name": "Query Document Rows",
+      "credentials": {
+        "postgres": {
+          "id": "VxjNZ8aVk0j4opgg",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "nomic-embed-text:latest"
+      },
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOllama",
+      "typeVersion": 1,
+      "position": [
+        -864,
+        384
+      ],
+      "id": "4daf6ce5-8127-4f06-8e3a-dc898480e3dd",
+      "name": "Embeddings Ollama1",
+      "credentials": {
+        "ollamaApi": {
+          "id": "4wh0mvQ4g5DXAScZ",
+          "name": "Ollama account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "llama3.1:latest",
+          "mode": "list",
+          "cachedResultName": "llama3.1:latest"
+        },
+        "options": {
+          "maxTokens": 10000,
+          "temperature": 0,
+          "timeout": 120000
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -1664,
+        384
+      ],
+      "id": "1c84980a-c25d-4744-abd0-3f96a17df377",
+      "name": "Ollama (LOCAL)",
+      "credentials": {
+        "openAiApi": {
+          "id": "HIAH5C3OR02mJryK",
+          "name": "Ollama - Local"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "toolDescription": "Default retrieval tool. Search across the knowledgebase to answer questions or find relevant documents by topic.",
+        "tableName": "documents_pg",
+        "topK": 50,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.vectorStorePGVector",
+      "typeVersion": 1.3,
+      "position": [
+        -1040,
+        208
+      ],
+      "id": "cfb07d8b-563b-4a88-8b77-da397f6d23f7",
+      "name": "Search Knowledgebase",
+      "credentials": {
+        "postgres": {
+          "id": "VxjNZ8aVk0j4opgg",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Chat Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List Documents": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get File Contents": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Document Rows": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "RAG Agent Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings Ollama1": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Search Knowledgebase",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama (LOCAL)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Knowledgebase": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "68676df8-4f02-49de-9c25-106e68edebea",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "bbee95706eaecd091836702484d380e88c8079a817de598aadc70e0b021cbfb5"
+  },
+  "id": "WiJwHVSOC1e1GMXU",
+  "tags": []
+}

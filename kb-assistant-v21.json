@@ -1,0 +1,1272 @@
+{
+  "name": "Starter - Routed KB Assistant",
+  "nodes": [
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "chat-trigger-1",
+      "name": "When chat message received",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1780,
+        200
+      ],
+      "webhookId": "starter-routed-kb-assistant"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "question",
+              "name": "question",
+              "type": "string",
+              "value": "={{ $json.chatInput || $json.text || $json.message || '' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "set-question-1",
+      "name": "Set Question",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1560,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const q = String($json.question || '').trim();\nconst lower = q.toLowerCase();\nconst hasFilenameMatch = q.match(/\\b[\\w() .\\-]+\\.(pdf|docx|doc|txt|csv|xlsx|xls)\\b/i);\nconst filename = hasFilenameMatch ? hasFilenameMatch[0].trim() : '';\nconst direct = /^(hi|hello|hey|good morning|good afternoon|good evening)$/i.test(q) || /what are you\\??|how can you help\\??/i.test(lower);\nconst asksList = /(list|show|what).*(files|documents)/i.test(lower) || /(files|documents).*(available|in the knowledgebase)/i.test(lower);\nconst tabular = /\\b(csv|excel|xlsx|xls|spreadsheet|rows|columns|sheet|dataset|table)\\b/i.test(lower);\nlet intent = 'search';\nif (direct) intent = 'direct';\nelse if (asksList) intent = 'list';\nelse if (tabular) intent = 'table';\nelse if (filename) intent = 'document';\nreturn [{ json: { ...$json, question_lower: lower, heuristic_intent: intent, extracted_document_name: filename, direct, asksList, tabular, hasFilename: !!filename } }];"
+      },
+      "id": "heuristic-router-1",
+      "name": "Heuristic Router",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1330,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "direct-or-list-or-doc-or-table",
+              "leftValue": "={{ ['direct','list','document','table'].includes($json.heuristic_intent) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-heuristic-confident-1",
+      "name": "If Heuristic Confident",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1100,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "messages": {
+          "messageValues": [
+            {
+              "message": "Classify the user message into one intent. Reply with ONLY a JSON object, nothing else.\n\nIntents:\n- direct: greeting or asking what you can do\n- list: asking to list or show available files/documents\n- search: asking about a topic, policy, concept, or guidance\n- document: asking about a specific named file (e.g. mentions .pdf, .docx)\n- table: asking about spreadsheet rows, columns, CSV, or Excel data\n\nIf unsure, use search.\n\nReply format (JSON only, no explanation):\n{\"intent\": \"search\", \"document_name\": \"\", \"reason_short\": \"topic question\"}\\n/no_think",
+              "type": "SystemMessagePromptTemplate"
+            }
+          ]
+        },
+        "promptType": "define",
+        "text": "={{ $json.question }}",
+        "hasOutputParser": false,
+        "options": {}
+      },
+      "id": "intent-classifier-1-chain",
+      "name": "Intent Classifier",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [
+        -870,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "qwen3:4b"
+        },
+        "options": {
+          "temperature": 0,
+          "maxTokens": 300,
+          "timeout": 120000
+        }
+      },
+      "id": "intent-classifier-1",
+      "name": "Intent Classifier LLM",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -870,
+        580
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "HIAH5C3OR02mJryK",
+          "name": "Ollama - Local"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// chainLlm outputs in $json.response or $json.text, but drops all original fields.\n// We need to recover the question from the Set Question node.\nconst question = $('Set Question').item.json.question || '';\nconst raw = String($json.response || $json.text || $json.content || $json.message || '').trim();\n\nif (!raw || raw.length < 3) {\n  return [{ json: { question, intent: 'search', document_name: '', reason_short: 'empty LLM response' } }];\n}\n\nlet parsed = null;\n\n// Try 1: Direct JSON parse\ntry { parsed = JSON.parse(raw); } catch(e) {}\n\n// Try 2: Strip markdown code blocks\nif (!parsed) {\n  try {\n    const cleaned = raw.replace(/```json\\s*/gi, '').replace(/```\\s*/gi, '').trim();\n    parsed = JSON.parse(cleaned);\n  } catch(e) {}\n}\n\n// Try 3: Extract first JSON object\nif (!parsed) {\n  const match = raw.match(/\\{[\\s\\S]*?\\}/);\n  if (match) { try { parsed = JSON.parse(match[0]); } catch(e) {} }\n}\n\n// Try 4: Regex extract intent value\nif (!parsed) {\n  const intentMatch = raw.match(/[\"']?intent[\"']?\\s*[:=]\\s*[\"']?(direct|list|search|document|table)[\"']?/i);\n  if (intentMatch) {\n    parsed = { intent: intentMatch[1].toLowerCase(), document_name: '', reason_short: 'regex extracted' };\n  }\n}\n\n// Try 5: Bare intent word\nif (!parsed) {\n  const lower = raw.toLowerCase().trim();\n  if (['direct','list','search','document','table'].includes(lower)) {\n    parsed = { intent: lower, document_name: '', reason_short: 'bare intent' };\n  }\n}\n\n// Final fallback\nif (!parsed) {\n  parsed = { intent: 'search', document_name: '', reason_short: 'parse failed' };\n}\n\nreturn [{ json: { question, intent: parsed.intent || 'search', document_name: parsed.document_name || '', reason_short: parsed.reason_short || '' } }];"
+      },
+      "id": "parse-classifier-json-1",
+      "name": "Parse Classifier JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -650,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Ensure question is always carried forward\nconst question = $json.question || $('Set Question').item.json.question || '';\nconst intent = $json.intent || $json.heuristic_intent || 'search';\nconst document_name = $json.document_name || $json.extracted_document_name || '';\nreturn [{ json: { question, intent, document_name } }];"
+      },
+      "id": "finalize-intent-1",
+      "name": "Finalize Intent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -420,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "direct",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "direct"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "list",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "list"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "search",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "search"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "document",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "document"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "table",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "table"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "search"
+        }
+      },
+      "id": "switch-intent-1",
+      "name": "Switch Intent",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        -180,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "messages": {
+          "messageValues": [
+            {
+              "message": "Answer the user's conversational question directly. Do not mention tools, retrieval, or the knowledgebase unless the user asks.\\n/no_think",
+              "type": "SystemMessagePromptTemplate"
+            }
+          ]
+        },
+        "promptType": "define",
+        "text": "={{ $json.question || $('Finalize Intent').item.json.question }}",
+        "hasOutputParser": false,
+        "options": {}
+      },
+      "id": "direct-answer-1-chain",
+      "name": "Direct Answer",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [
+        120,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "qwen3:4b"
+        },
+        "options": {
+          "temperature": 0.2,
+          "maxTokens": 600,
+          "timeout": 120000
+        }
+      },
+      "id": "direct-answer-1",
+      "name": "Direct Answer LLM",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        120,
+        60
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "HIAH5C3OR02mJryK",
+          "name": "Ollama - Local"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, title, sheet_name\nFROM document_metadata\nORDER BY COALESCE(title, id);",
+        "options": {}
+      },
+      "id": "list-documents-query-1",
+      "name": "List Documents Query",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        120,
+        200
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "VxjNZ8aVk0j4opgg",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const q = $json.question || '';\nconst count = $json.document_count || 0;\nconst list = $json.document_list || 'No documents found.';\nconst text = `Here are the ${count} documents available in the knowledgebase:\\n\\n${list}`;\nreturn [{ json: { text } }];"
+      },
+      "id": "compose-list-answer-1-chain",
+      "name": "Compose List Answer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "model": "nomic-embed-text:latest"
+      },
+      "id": "embeddings-1",
+      "name": "Embeddings Ollama1",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOllama",
+      "typeVersion": 1,
+      "position": [
+        120,
+        660
+      ],
+      "credentials": {
+        "ollamaApi": {
+          "id": "4wh0mvQ4g5DXAScZ",
+          "name": "Ollama account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, title, sheet_name\nFROM document_metadata\nWHERE LOWER(COALESCE(id, '')) LIKE LOWER('%' || $1 || '%')\n   OR LOWER(COALESCE(title, '')) LIKE LOWER('%' || $1 || '%')\nORDER BY\n  CASE\n    WHEN LOWER(COALESCE(title, '')) = LOWER($1) THEN 1\n    WHEN LOWER(COALESCE(id, '')) = LOWER($1) THEN 2\n    WHEN LOWER(COALESCE(title, '')) LIKE LOWER($1 || '%') THEN 3\n    WHEN LOWER(COALESCE(id, '')) LIKE LOWER($1 || '%') THEN 4\n    ELSE 5\n  END,\n  COALESCE(title, id)\nLIMIT 5;",
+        "options": {
+          "queryReplacement": "={{ $json.document_name || $json.extracted_document_name || $json.question }}"
+        }
+      },
+      "id": "resolve-document-query-1",
+      "name": "Resolve Document Query",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        120,
+        820
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "VxjNZ8aVk0j4opgg",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const question = $('Finalize Intent').item.json.question || '';\nconst rows = $input.all().map(i => i.json);\nif (!rows.length) {\n  return [{ json: { found: false, error: 'No matching document found', question, document_name: $('Finalize Intent').item.json.document_name || '' } }];\n}\nconst chosen = rows[0];\nconst doc_id = chosen.id || '';\nconst doc_title = chosen.title || '';\nconst doc_sheet = chosen.sheet_name || '';\nreturn [{ json: { id: doc_id, title: doc_title, sheet_name: doc_sheet, question, found: true, document_name: doc_title || doc_id } }];"
+      },
+      "id": "normalize-file-id-1",
+      "name": "Normalize file_id",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        380,
+        820
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.found }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-document-found-1",
+      "name": "If Document Found",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        600,
+        820
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT string_agg(text, ' ') AS document_text\nFROM documents_pg\nWHERE metadata->>'file_id' = $1\n   OR metadata->>'file_id' = '/files/' || $1\n   OR metadata->>'source' = $1\n   OR metadata->>'id' = $1\nGROUP BY COALESCE(metadata->>'file_id', metadata->>'source', metadata->>'id');",
+        "options": {
+          "queryReplacement": "={{ $json.id }}"
+        }
+      },
+      "id": "get-file-contents-query-1",
+      "name": "Get File Contents Query",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        820,
+        780
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "VxjNZ8aVk0j4opgg",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "messages": {
+          "messageValues": [
+            {
+              "message": "You are a document-grounded assistant. The full text of a specific document has already been retrieved. Answer the user's exact question from that text. Do not continue searching. Do not discuss tools or process. If the user asked for a summary, provide a concise summary. If the user asked a targeted question, extract only the relevant parts. At the end, list the source document name. If the answer is not in the text, say it could not be found in the document.\\n/no_think",
+              "type": "SystemMessagePromptTemplate"
+            }
+          ]
+        },
+        "promptType": "define",
+        "text": "=User question: {{ $json.question }}\n\nDocument: {{ $json.document_name }}\n\nDocument text:\n{{ $json.document_text }}",
+        "hasOutputParser": false,
+        "options": {}
+      },
+      "id": "compose-document-answer-1-chain",
+      "name": "Compose Document Answer",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [
+        1200,
+        780
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "qwen3:4b"
+        },
+        "options": {
+          "temperature": 0,
+          "maxTokens": 1200,
+          "timeout": 120000
+        }
+      },
+      "id": "compose-document-answer-1",
+      "name": "Compose Document Answer LLM",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        1200,
+        940
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "HIAH5C3OR02mJryK",
+          "name": "Ollama - Local"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "response",
+              "name": "response",
+              "type": "string",
+              "value": "={{ 'The requested document could not be found in the knowledgebase.' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "document-not-found-1",
+      "name": "Document Not Found",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        820,
+        920
+      ]
+    },
+    {
+      "parameters": {
+        "messages": {
+          "messageValues": [
+            {
+              "message": "Generate only a SQL query or the token NO_SQL. The request must be explicitly row, column, spreadsheet, CSV, Excel, sheet, or dataset oriented. Query only the document_rows table. Always use FROM document_rows, jsonb_array_elements(row_data -> 'data') AS data_elements. Filter by dataset_id when a document is identified.\\n/no_think",
+              "type": "SystemMessagePromptTemplate"
+            }
+          ]
+        },
+        "promptType": "define",
+        "text": "=User question: {{ $json.question || $('Finalize Intent').item.json.question }}\n\nDocument name (if any): {{ $json.document_name || 'none' }}",
+        "hasOutputParser": false,
+        "options": {}
+      },
+      "id": "table-sql-generator-1-chain",
+      "name": "Table SQL Generator",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [
+        120,
+        1120
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "qwen3:4b"
+        },
+        "options": {
+          "temperature": 0,
+          "maxTokens": 500,
+          "timeout": 120000
+        }
+      },
+      "id": "table-sql-generator-1",
+      "name": "Table SQL Generator LLM",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        120,
+        1280
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "HIAH5C3OR02mJryK",
+          "name": "Ollama - Local"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const question = $('Finalize Intent').item.json.question || '';\nconst raw = String($json.response || $json.text || $json.content || '').trim();\nconst cleaned = raw.replace(/```sql\\s*/gi, '').replace(/```\\s*/gi, '').trim();\nreturn [{ json: { question, sql_query: cleaned, has_sql: cleaned && cleaned !== 'NO_SQL' && cleaned.length > 5 } }];"
+      },
+      "id": "parse-sql-1",
+      "name": "Parse SQL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        380,
+        1120
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.has_sql }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-sql-1",
+      "name": "If Has SQL",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        600,
+        1120
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.sql_query }}",
+        "options": {}
+      },
+      "id": "query-document-rows-direct-1",
+      "name": "Query Document Rows Direct",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        820,
+        1080
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "VxjNZ8aVk0j4opgg",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "messages": {
+          "messageValues": [
+            {
+              "message": "Answer the user's tabular-data question using only the query results returned from document_rows. If the results are empty, say the requested information could not be found in the tabular data.\\n/no_think",
+              "type": "SystemMessagePromptTemplate"
+            }
+          ]
+        },
+        "promptType": "define",
+        "text": "=User question: {{ $json.question }}\n\n{{ $json.row_count }} rows returned:\n{{ $json.query_results }}",
+        "hasOutputParser": false,
+        "options": {}
+      },
+      "id": "compose-table-answer-1-chain",
+      "name": "Compose Table Answer",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [
+        1200,
+        1080
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "qwen3:4b"
+        },
+        "options": {
+          "temperature": 0,
+          "maxTokens": 900,
+          "timeout": 120000
+        }
+      },
+      "id": "compose-table-answer-1",
+      "name": "Compose Table Answer LLM",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        1200,
+        1240
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "HIAH5C3OR02mJryK",
+          "name": "Ollama - Local"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "response",
+              "name": "response",
+              "type": "string",
+              "value": "={{ 'This request did not contain enough explicit tabular intent to run a row query.' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "no-sql-response-1",
+      "name": "No SQL Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        820,
+        1220
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "load",
+        "tableName": "documents_pg",
+        "prompt": "={{ $json.question }}",
+        "limit": 15,
+        "options": {
+          "distanceStrategy": "cosine"
+        }
+      },
+      "id": "search-knowledgebase-1",
+      "name": "Search Knowledgebase",
+      "type": "@n8n/n8n-nodes-langchain.vectorStorePGVector",
+      "typeVersion": 1.3,
+      "position": [
+        120,
+        500
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "VxjNZ8aVk0j4opgg",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const question = $('Finalize Intent').item.json.question || '';\nconst rows = $input.all().map(i => i.json);\nconst docList = rows.map(r => {\n  const name = r.title || r.id || 'Unknown';\n  const sheet = r.sheet_name && r.sheet_name !== '[empty]' ? ` (Sheet: ${r.sheet_name})` : '';\n  return `- ${name}${sheet}`;\n}).join('\\n');\nreturn [{ json: { question, document_list: docList, document_count: rows.length } }];"
+      },
+      "id": "prepare-list-data-1",
+      "name": "Prepare List Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        280,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const question = $('Finalize Intent').item.json.question || '';\nconst document_name = $('Normalize file_id').item.json.title || $('Normalize file_id').item.json.id || 'Unknown';\nconst rows = $input.all().map(i => i.json);\nconst document_text = rows.map(r => r.document_text || '').join('\\n');\nreturn [{ json: { question, document_name, document_text } }];"
+      },
+      "id": "prepare-doc-data-1",
+      "name": "Prepare Document Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        780
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const question = $('Finalize Intent').item.json.question || '';\nconst rows = $input.all().map(i => i.json);\nconst result_text = JSON.stringify(rows, null, 2);\nreturn [{ json: { question, query_results: result_text, row_count: rows.length } }];"
+      },
+      "id": "prepare-table-data-1",
+      "name": "Prepare Table Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        1080
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const question = $('Finalize Intent').item.json.question || '';\nconst rows = $input.all().map(i => i.json);\nconst context = rows.map((r, idx) => {\n  const doc = r.document || r;\n  const meta = doc.metadata || r.metadata || {};\n  const source = meta.file_title || meta.file_id || 'Unknown';\n  const text = doc.pageContent || r.pageContent || r.text || JSON.stringify(r);\n  return `[${idx + 1}] (${source}):\\n${text}`;\n}).join('\\n\\n');\nreturn [{ json: { question, context, chunk_count: rows.length } }];"
+      },
+      "id": "prepare-search-data-1",
+      "name": "Prepare Search Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        380,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "messages": {
+          "messageValues": [
+            {
+              "message": "You are a knowledgebase assistant. Use the retrieved context below to answer the user's question.\n\nRules:\n- Synthesize a clear, confident answer from the context. If the context contains partial information across multiple excerpts, combine them.\n- If a term or acronym appears repeatedly in the context, treat that as sufficient evidence to define it.\n- Phase-specific information may appear in separate chunks from role definitions. Cross-reference across all provided context.\n- Only say you cannot answer if the context is truly unrelated to the question.\n- At the end, list the source document names.\\n/no_think",
+              "type": "SystemMessagePromptTemplate"
+            }
+          ]
+        },
+        "promptType": "define",
+        "text": "=User question: {{ $json.question }}\n\nRetrieved context ({{ $json.chunk_count }} excerpts):\n{{ $json.context }}",
+        "hasOutputParser": false,
+        "options": {}
+      },
+      "id": "compose-search-answer-1",
+      "name": "Compose Search Answer",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [
+        620,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "qwen3:4b"
+        },
+        "options": {
+          "temperature": 0,
+          "maxTokens": 1000,
+          "timeout": 120000
+        }
+      },
+      "id": "compose-search-llm-1",
+      "name": "Compose Search Answer LLM",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        620,
+        660
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "HIAH5C3OR02mJryK",
+          "name": "Ollama - Local"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "Set Question",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Question": {
+      "main": [
+        [
+          {
+            "node": "Heuristic Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Heuristic Router": {
+      "main": [
+        [
+          {
+            "node": "If Heuristic Confident",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Heuristic Confident": {
+      "main": [
+        [
+          {
+            "node": "Finalize Intent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Intent Classifier",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Intent Classifier": {
+      "main": [
+        [
+          {
+            "node": "Parse Classifier JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Classifier JSON": {
+      "main": [
+        [
+          {
+            "node": "Finalize Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finalize Intent": {
+      "main": [
+        [
+          {
+            "node": "Switch Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch Intent": {
+      "main": [
+        [
+          {
+            "node": "Direct Answer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "List Documents Query",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Search Knowledgebase",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resolve Document Query",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Table SQL Generator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List Documents Query": {
+      "main": [
+        [
+          {
+            "node": "Prepare List Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings Ollama1": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Search Knowledgebase",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Document Query": {
+      "main": [
+        [
+          {
+            "node": "Normalize file_id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize file_id": {
+      "main": [
+        [
+          {
+            "node": "If Document Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Document Found": {
+      "main": [
+        [
+          {
+            "node": "Get File Contents Query",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Document Not Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get File Contents Query": {
+      "main": [
+        [
+          {
+            "node": "Prepare Document Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Table SQL Generator": {
+      "main": [
+        [
+          {
+            "node": "Parse SQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse SQL": {
+      "main": [
+        [
+          {
+            "node": "If Has SQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Has SQL": {
+      "main": [
+        [
+          {
+            "node": "Query Document Rows Direct",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No SQL Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Document Rows Direct": {
+      "main": [
+        [
+          {
+            "node": "Prepare Table Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Intent Classifier LLM": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Intent Classifier",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Direct Answer LLM": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Direct Answer",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compose Document Answer LLM": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Compose Document Answer",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Table SQL Generator LLM": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Table SQL Generator",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compose Table Answer LLM": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Compose Table Answer",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Knowledgebase": {
+      "main": [
+        [
+          {
+            "node": "Prepare Search Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare List Data": {
+      "main": [
+        [
+          {
+            "node": "Compose List Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Document Data": {
+      "main": [
+        [
+          {
+            "node": "Compose Document Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Table Data": {
+      "main": [
+        [
+          {
+            "node": "Compose Table Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Search Data": {
+      "main": [
+        [
+          {
+            "node": "Compose Search Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compose Search Answer LLM": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Compose Search Answer",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "starter-routed-kb-assistant-v1"
+}

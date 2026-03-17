@@ -1,0 +1,26 @@
+use_default_settings: true
+
+general:
+  instance_name: "Local SearXNG"
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  formats:
+    - html
+    - json
+
+server:
+  secret_key: "lashormigasenfranciacaminanconelegancia"
+  limiter: false
+  image_proxy: true
+
+ui:
+  static_use_hash: true
+
+engines:
+  - name: ahmia
+    disabled: true
+  - name: torch
+    disabled: true
+ 

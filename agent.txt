@@ -1,0 +1,100 @@
+The workflow is trying to act like a **document-aware assistant**.
+
+From the **AI Agent’s point of view**, its job is:
+
+Take a user’s question, decide whether it can answer directly or needs help from the knowledgebase, use the right tool or tools to get the missing context, and then give the user a clean final answer.
+
+The intended behavior is this:
+
+If the question is just conversational, such as:
+
+* “Hello”
+* “What are you?”
+* “How can you help?”
+
+the agent should answer directly without touching any tools.
+
+If the question is about the **knowledgebase in general**, such as:
+
+* “What SOPs exist for critical partners?”
+* “What does the knowledgebase say about X?”
+
+the agent should usually start with:
+
+* `search_knowledgebase`
+
+because that is the broad retrieval tool meant to find relevant content across one or more documents.
+
+If the user asks for a **list of available documents**, such as:
+
+* “What documents are in the knowledgebase?”
+* “List the files”
+
+the agent should use:
+
+* `list_documents`
+
+and if that already answers the question, stop there and respond.
+
+If the user asks about a **specific named document**, such as:
+
+* “Summarize Smry_2025_7997.pdf”
+* “What are the top points in this PDF?”
+
+the agent should:
+
+1. use `list_documents` to resolve the document name to its real id and metadata
+2. use `get_file_contents` with the resolved `file_id`
+3. once `document_text` is returned, stop using tools
+4. summarize or answer from that text
+
+If the user is asking about **tabular content**, such as spreadsheets or row/column-style data, then the agent should notice that from either:
+
+* the user’s request
+* or the `sheet_name` metadata returned by `list_documents`
+
+and only then use:
+
+* `query_document_rows`
+
+So the ideal mental model for the AI Agent is:
+
+* **direct answer** when no tool is needed
+* **search_knowledgebase** for most content questions
+* **list_documents** for inventory or filename resolution
+* **get_file_contents** for a specific identified document
+* **query_document_rows** only for confirmed row-based/tabular data
+
+The workflow is also trying to enforce an important discipline:
+
+The agent should not just “talk about” what tool it wants to use.
+It should actually call the tool, get the result, and then continue.
+
+So from the AI Agent’s point of view, the correct cycle is:
+
+1. understand the user’s intent
+2. choose the best next tool, if needed
+3. call only that tool
+4. inspect the returned result
+5. decide whether another tool is still needed
+6. stop as soon as enough context has been retrieved
+7. provide the final user-facing answer
+
+What it should **not** do:
+
+* describe a plan
+* invent tool names
+* assume tool results
+* call the same tool repeatedly with the same input
+* keep searching once it already has `document_text`
+* answer from metadata when the user asked for actual content
+
+In plain English, the workflow is trying to make the AI Agent behave like a smart librarian and analyst:
+
+* first decide whether the answer is already obvious
+* if not, look in the right place
+* if the user names a document, locate it and read it
+* if the content is structured like a table, query it properly
+* then give the user the answer, not the reasoning trail
+
+That is what the workflow is trying to achieve.

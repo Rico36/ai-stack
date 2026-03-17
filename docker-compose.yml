@@ -1,0 +1,216 @@
+# ------------------
+# docker compose pull
+# docker compose up -d
+#
+# then open:
+# Open WebUI: http://localhost:3000 ..and Set the Ollama backend to: http://ollama:11434
+# Open n8n: http://localhost:5678
+#  and create credentials or plain HTTP nodes that call:
+#      Ollama: http://ollama:11434
+#      Qdrant: http://qdrant:6333
+#      SearXNG: http://searxng:8080/search
+#
+# Open SearXNG: http://localhost:8081
+# Open Qdrant API: http://localhost:6333
+# ---------------------
+# After start up, pull some models in
+# docker exec -it ollama ollama pull qwen2.5:14b
+# docker exec -it ollama ollama pull llama3.1:8b
+# docker exec -it ollama ollama pull mistral:7b
+#
+volumes:
+  n8n_storage:
+    name: n8n_storage
+  ollama_storage:
+    name: ollama_storage
+  qdrant_storage:
+    name: qdrant_storage
+  open-webui:
+    name: open-webui
+  postgres_storage:
+    name: postgres_storage
+  valkey-data:
+    name: valkey-data
+  pgadmin-storage:
+    name: pgadmin-storage 
+  searxng-cache:
+    name: searxng-cache
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      N8N_DB_USER: ${N8N_DB_USER}
+      N8N_DB_PASSWORD: ${N8N_DB_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_storage:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d
+    networks:
+      - ai_net
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin-storage:/var/lib/pgadmin
+    networks:
+      - ai_net
+
+  redis:
+    container_name: redis
+    image: docker.io/valkey/valkey:8-alpine
+    command: valkey-server --save 30 1 --loglevel warning
+    restart: unless-stopped
+    expose:
+      - 6379/tcp
+    volumes:
+      - valkey-data:/data
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETGID
+      - SETUID
+      - DAC_OVERRIDE
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 3s
+      timeout: 10s
+      retries: 10      
+    networks:
+      - ai_net
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    networks:
+      - ai_net
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_storage:/root/.ollama
+    gpus: all
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      OLLAMA_KEEP_ALIVE: "15m"
+      OLLAMA_FLASH_ATTENTION: 1
+      OLLAMA_KV_CACHE_TYPE: q8_0
+      OLLAMA_NUM_CTX: 8192    # OLLAMA_NUM_CTX=16384
+      OLLAMA_MAX_LOADED_MODELS: 2
+    networks:
+      - ai_net
+      
+  searxng:
+    container_name: searxng
+    image: docker.io/searxng/searxng:latest
+    restart: unless-stopped
+    expose:
+      - 8080/tcp
+    volumes:
+      - ./searxng:/etc/searxng:rw
+      - searxng-cache:/var/cache/searxng
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8080/
+      - UWSGI_WORKERS=${SEARXNG_UWSGI_WORKERS:-4}
+      - UWSGI_THREADS=${SEARXNG_UWSGI_THREADS:-4}
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1m"
+        max-file: "1"  
+    networks:
+      - ai_net
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    restart: unless-stopped
+    depends_on:
+      - ollama
+    ports:
+      - "3000:8080"
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY}
+    volumes:
+      - open-webui:/app/backend/data
+    networks:
+      - ai_net
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: n8n
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - qdrant
+      - ollama
+      - searxng
+      - redis
+    ports:
+      - "5678:5678"
+    environment:
+      N8N_HOST: ${N8N_HOST}
+      N8N_PORT: "5678"
+      N8N_PROTOCOL: "http"
+      WEBHOOK_URL: ${WEBHOOK_URL}
+      GENERIC_TIMEZONE: ${TZ}
+      TZ: ${TZ}
+      NODES_EXCLUDE: '[]'
+      N8N_SECURE_COOKIE: "false"
+      N8N_RUNNERS_ENABLED: "true"
+      N8N_DEFAULT_BINARY_DATA_MODE: "filesystem"
+      N8N_BINARY_DATA_STORAGE_PATH: "/binary-data"
+      N8N_RESTRICT_FILE_ACCESS_TO: /files
+      N8N_DIAGNOSTICS_ENABLED: false
+      N8N_PERSONALIZATION_ENABLED: false
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
+      N8N_USER_MANAGEMENT_JWT_SECRET: ${N8N_USER_MANAGEMENT_JWT_SECRET}
+
+    volumes:
+      - n8n_storage:/home/node/.n8n
+      - "D:/knowledgebase:/files"
+      - ./n8n/binary-data:/binary-data
+    networks:
+      - ai_net
+
+networks:
+  ai_net:
+    driver: bridge
