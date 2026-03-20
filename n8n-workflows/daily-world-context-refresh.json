@@ -1,0 +1,176 @@
+{
+  "name": "Local AI - Daily World Context Refresh",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "id": "schedule-world",
+      "name": "Every 6 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const categories = [{ key: 'world', q: 'world news' }, { key: 'us', q: 'U.S. news' }, { key: 'technology', q: 'technology news' }, { key: 'finance', q: 'finance markets news' }]; return categories.map(category => ({ json: category }));"
+      },
+      "id": "build-queries",
+      "name": "Build Search Queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://searxng:8080/search",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "q", "value": "={{$json.q}}" },
+            { "name": "format", "value": "json" },
+            { "name": "language", "value": "en-US" },
+            { "name": "safesearch", "value": "0" },
+            { "name": "categories", "value": "news" }
+          ]
+        }
+      },
+      "id": "search-searxng",
+      "name": "Query SearXNG",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all();\nconst dedupe = new Map();\nfor (const row of rows) {\n  const bucket = row.json.key || 'general';\n  const results = row.json.results || [];\n  for (const result of results.slice(0, 6)) {\n    const url = result.url || result.link;\n    const title = result.title || 'Untitled';\n    const snippet = result.content || result.snippet || '';\n    if (!url || dedupe.has(url)) continue;\n    dedupe.set(url, { bucket, title, snippet, url });\n  }\n}\nconst items = Array.from(dedupe.values()).slice(0, Number($env.WORLD_CONTEXT_MAX_ITEMS || 12));\nconst bulletList = items.map((item, index) => `${index + 1}. [${item.bucket}] ${item.title}\\nURL: ${item.url}\\nSnippet: ${item.snippet}`).join('\\n\\n');\nreturn [{ json: { bulletList, filePath: '/data/assistant-memory/context/daily_world_context.md' } }];"
+      },
+      "id": "dedupe-results",
+      "name": "Dedupe Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [980, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ollama:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": $env.OLLAMA_SUMMARY_MODEL || \"qwen2.5:7b-instruct-q4_K_M\",\n  \"stream\": false,\n  \"prompt\": \"You are summarizing recent news for a local assistant. Produce concise markdown with sections: Top Developments, Why It Matters, Watchlist. Use only the provided search results, deduplicate overlap, avoid speculation, and keep it under 500 words.\\n\\nSearch results:\\n\\n\" + $json.bulletList\n}"
+      },
+      "id": "summarize-world",
+      "name": "Summarize With Ollama",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1260, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const summary = $json.response || 'No summary generated.';\nconst now = new Date().toISOString();\nconst markdown = `# Daily World Context\\n\\n- Last updated: ${now}\\n- Source: SearXNG via scheduled n8n workflow\\n\\n${summary}\\n`;\nreturn [{ json: { markdown, filePath: '/data/assistant-memory/context/daily_world_context.md' } }];"
+      },
+      "id": "assemble-world-markdown",
+      "name": "Assemble Markdown",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1520, 300]
+    },
+    {
+      "parameters": {
+        "command": "mkdir -p /data/assistant-memory/context && cat > /data/assistant-memory/context/daily_world_context.md <<'EOF'\n{{$json.markdown}}\nEOF"
+      },
+      "id": "write-world-file",
+      "name": "Write World Context",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1780, 300]
+    },
+    {
+      "parameters": {
+        "filePath": "={{$json.filePath}}",
+        "dataPropertyName": "data"
+      },
+      "id": "read-world-file",
+      "name": "Read World Context File",
+      "type": "n8n-nodes-base.readBinaryFile",
+      "typeVersion": 1,
+      "position": [2040, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{($env.ANYTHINGLLM_API_BASE || 'http://host.docker.internal:3001') + '/api/v1/document/upload/' + ($env.ANYTHINGLLM_UPLOAD_FOLDER || 'assistant-memory')}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.ANYTHINGLLM_API_KEY}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            }
+          ]
+        }
+      },
+      "id": "upload-world-document",
+      "name": "Upload World Context",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2300, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{($env.ANYTHINGLLM_API_BASE || 'http://host.docker.internal:3001') + '/api/v1/workspace/' + $env.ANYTHINGLLM_WORKSPACE_SLUG + '/update-embeddings'}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.ANYTHINGLLM_API_KEY}}"
+            }
+          ]
+        }
+      },
+      "id": "refresh-world-embeddings",
+      "name": "Refresh Workspace Embeddings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2560, 300]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Every 6 Hours": { "main": [[{ "node": "Build Search Queries", "type": "main", "index": 0 }]] },
+    "Build Search Queries": { "main": [[{ "node": "Query SearXNG", "type": "main", "index": 0 }]] },
+    "Query SearXNG": { "main": [[{ "node": "Dedupe Results", "type": "main", "index": 0 }]] },
+    "Dedupe Results": { "main": [[{ "node": "Summarize With Ollama", "type": "main", "index": 0 }]] },
+    "Summarize With Ollama": { "main": [[{ "node": "Assemble Markdown", "type": "main", "index": 0 }]] },
+    "Assemble Markdown": { "main": [[{ "node": "Write World Context", "type": "main", "index": 0 }]] },
+    "Write World Context": { "main": [[{ "node": "Read World Context File", "type": "main", "index": 0 }]] },
+    "Read World Context File": { "main": [[{ "node": "Upload World Context", "type": "main", "index": 0 }]] },
+    "Upload World Context": { "main": [[{ "node": "Refresh Workspace Embeddings", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "daily-world-context-v2"
+}

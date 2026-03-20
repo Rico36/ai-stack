@@ -1,0 +1,165 @@
+{
+  "name": "Local AI - Weekly Memory Consolidation",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "weeksInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "schedule-weekly",
+      "name": "Weekly Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [220, 280]
+    },
+    {
+      "parameters": {
+        "command": "for f in /data/assistant-memory/memory/*.md; do echo \"---FILE:$f---\"; cat \"$f\"; echo; done"
+      },
+      "id": "read-memory-files",
+      "name": "Read Current Memory",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [500, 280]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ollama:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": $env.OLLAMA_SUMMARY_MODEL || \"qwen2.5:7b-instruct-q4_K_M\",\n  \"stream\": false,\n  \"prompt\": \"You are consolidating personal assistant memory. Reduce duplicates, keep only high-value durable facts, preserve active projects and decisions, and refresh recent context. Return markdown with sections exactly named: IdentityAndPreferences, CurrentProjects, ActiveDecisions, EnvironmentAndTools, RecentContextSummary, ArchiveNotes.\\n\\nCurrent memory files:\\n\\n\" + ($json.stdout || '')\n}"
+      },
+      "id": "consolidate-with-ollama",
+      "name": "Consolidate With Ollama",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [820, 280]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $json.response || '';\nfunction section(name) {\n  const regex = new RegExp(`${name}\\\\n([\\\\s\\\\S]*?)(?=\\\\n[A-Z][A-Za-z]+(?:And[A-Za-z]+)?\\\\n|$)`);\n  const match = response.match(regex);\n  return (match?.[1] || '').trim() || '- No updates generated';\n}\nconst now = new Date().toISOString().replace(/[:.]/g, '-');\nreturn [{ json: {\n  identity: `# Identity And Preferences\\n\\n${section('IdentityAndPreferences')}\\n`,\n  projects: `# Current Projects\\n\\n${section('CurrentProjects')}\\n`,\n  decisions: `# Active Decisions\\n\\n${section('ActiveDecisions')}\\n`,\n  tools: `# Environment And Tools\\n\\n${section('EnvironmentAndTools')}\\n`,\n  recent: `# Recent Context Summary\\n\\n${section('RecentContextSummary')}\\n`,\n  archive: section('ArchiveNotes'),\n  now\n} }];"
+      },
+      "id": "split-consolidation",
+      "name": "Split Consolidated Sections",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 280]
+    },
+    {
+      "parameters": {
+        "command": "mkdir -p /data/assistant-memory/archive /data/assistant-memory/backups/weekly && cp /data/assistant-memory/memory/*.md /data/assistant-memory/backups/weekly/ 2>/dev/null || true\ncat > /data/assistant-memory/memory/identity_and_preferences.md <<'EOF'\n{{$json.identity}}\nEOF\ncat > /data/assistant-memory/memory/current_projects.md <<'EOF'\n{{$json.projects}}\nEOF\ncat > /data/assistant-memory/memory/active_decisions.md <<'EOF'\n{{$json.decisions}}\nEOF\ncat > /data/assistant-memory/memory/environment_and_tools.md <<'EOF'\n{{$json.tools}}\nEOF\ncat > /data/assistant-memory/memory/recent_context_summary.md <<'EOF'\n{{$json.recent}}\nEOF\ncat > /data/assistant-memory/archive/consolidation-{{$json.now}}.md <<'EOF'\n# Weekly Consolidation Notes\n\n{{$json.archive}}\nEOF"
+      },
+      "id": "write-consolidated-files",
+      "name": "Write Consolidated Memory",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1420, 280]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [\n  { json: { filePath: '/data/assistant-memory/memory/identity_and_preferences.md' } },\n  { json: { filePath: '/data/assistant-memory/memory/current_projects.md' } },\n  { json: { filePath: '/data/assistant-memory/memory/active_decisions.md' } },\n  { json: { filePath: '/data/assistant-memory/memory/environment_and_tools.md' } },\n  { json: { filePath: '/data/assistant-memory/memory/recent_context_summary.md' } }\n];"
+      },
+      "id": "build-upload-list",
+      "name": "Build Upload List",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1680, 280]
+    },
+    {
+      "parameters": {
+        "filePath": "={{$json.filePath}}",
+        "dataPropertyName": "data"
+      },
+      "id": "read-consolidated-file",
+      "name": "Read Consolidated File",
+      "type": "n8n-nodes-base.readBinaryFile",
+      "typeVersion": 1,
+      "position": [1940, 280]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{($env.ANYTHINGLLM_API_BASE || 'http://host.docker.internal:3001') + '/api/v1/document/upload/' + ($env.ANYTHINGLLM_UPLOAD_FOLDER || 'assistant-memory')}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.ANYTHINGLLM_API_KEY}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            }
+          ]
+        }
+      },
+      "id": "upload-consolidated-file",
+      "name": "Upload Consolidated File",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2200, 280]
+    },
+    {
+      "parameters": {
+        "jsCode": "const uploads = $input.all();\nreturn [{ json: { uploadedFiles: uploads.length } }];"
+      },
+      "id": "collapse-for-refresh",
+      "name": "Collapse For Refresh",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2460, 280]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{($env.ANYTHINGLLM_API_BASE || 'http://host.docker.internal:3001') + '/api/v1/workspace/' + $env.ANYTHINGLLM_WORKSPACE_SLUG + '/update-embeddings'}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.ANYTHINGLLM_API_KEY}}"
+            }
+          ]
+        }
+      },
+      "id": "refresh-consolidated-embeddings",
+      "name": "Refresh Workspace Embeddings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2720, 280]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Weekly Trigger": { "main": [[{ "node": "Read Current Memory", "type": "main", "index": 0 }]] },
+    "Read Current Memory": { "main": [[{ "node": "Consolidate With Ollama", "type": "main", "index": 0 }]] },
+    "Consolidate With Ollama": { "main": [[{ "node": "Split Consolidated Sections", "type": "main", "index": 0 }]] },
+    "Split Consolidated Sections": { "main": [[{ "node": "Write Consolidated Memory", "type": "main", "index": 0 }]] },
+    "Write Consolidated Memory": { "main": [[{ "node": "Build Upload List", "type": "main", "index": 0 }]] },
+    "Build Upload List": { "main": [[{ "node": "Read Consolidated File", "type": "main", "index": 0 }]] },
+    "Read Consolidated File": { "main": [[{ "node": "Upload Consolidated File", "type": "main", "index": 0 }]] },
+    "Upload Consolidated File": { "main": [[{ "node": "Collapse For Refresh", "type": "main", "index": 0 }]] },
+    "Collapse For Refresh": { "main": [[{ "node": "Refresh Workspace Embeddings", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "weekly-memory-consolidation-v2"
+}

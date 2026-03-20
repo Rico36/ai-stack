@@ -159,7 +159,7 @@ services:
       - ai_net
 
   open-webui:
-    image: ghcr.io/open-webui/open-webui:main
+    image: ghcr.io/open-webui/open-webui:v0.8.10
     container_name: open-webui
     restart: unless-stopped
     depends_on:
@@ -171,6 +171,7 @@ services:
       WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY}
     volumes:
       - open-webui:/app/backend/data
+      - ${LOCAL_AI_DATA_ROOT:-./local-ai-data/assistant-memory}:/data/assistant-memory:ro
     networks:
       - ai_net
 
@@ -203,11 +204,23 @@ services:
       N8N_PERSONALIZATION_ENABLED: false
       N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
       N8N_USER_MANAGEMENT_JWT_SECRET: ${N8N_USER_MANAGEMENT_JWT_SECRET}
+      MEMORY_CAPTURE_TOKEN: ${MEMORY_CAPTURE_TOKEN}
+      OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL:-qwen2.5:14b-instruct-q4_K_M}
+      OLLAMA_SUMMARY_MODEL: ${OLLAMA_SUMMARY_MODEL:-qwen2.5:7b-instruct-q4_K_M}
+      WORLD_CONTEXT_MAX_ITEMS: ${WORLD_CONTEXT_MAX_ITEMS:-12}
+      WORLD_CONTEXT_LOOKBACK_DAYS: ${WORLD_CONTEXT_LOOKBACK_DAYS:-2} 
+      ANYTHINGLLM_API_BASE: ${ANYTHINGLLM_API_BASE:-http://host.docker.internal:3001}
+      ANYTHINGLLM_API_KEY: ${ANYTHINGLLM_API_KEY}
+      ANYTHINGLLM_WORKSPACE_SLUG: ${ANYTHINGLLM_WORKSPACE_SLUG}
+      ANYTHINGLLM_UPLOAD_FOLDER: ${ANYTHINGLLM_UPLOAD_FOLDER:-assistant-memory}
+      ANYTHINGLLM_SYNC_RUNTIME_CONTEXT: ${ANYTHINGLLM_SYNC_RUNTIME_CONTEXT:-false}
 
     volumes:
       - n8n_storage:/home/node/.n8n
       - "D:/knowledgebase:/files"
       - ./n8n/binary-data:/binary-data
+      - ${LOCAL_AI_DATA_ROOT:-./local-ai-data/assistant-memory}:/data/assistant-memory
+
     networks:
       - ai_net
 
