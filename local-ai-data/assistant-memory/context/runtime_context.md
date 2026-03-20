@@ -1,8 +1,11 @@
 # Runtime Context
 
-- Current time source: n8n scheduled workflow
-- Status: bootstrap placeholder
+- Current date: Friday, March 20, 2026
+- Current time: 12:00:00 PM Eastern Daylight Time
+- Weekday: Friday
 - Timezone: America/New_York
-- Last updated: not yet refreshed
+- Human timestamp: Friday, March 20, 2026 at 12:00:00 PM Eastern Daylight Time
+- ISO timestamp: 2026-03-20T16:00:00.000Z
+- Refreshed by: manual workspace update pending n8n automation
 
-The assistant must prefer this file over model guesses for date and time once automation is active.
+Use this file as the authoritative source for current date and time.
