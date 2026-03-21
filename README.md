@@ -48,6 +48,24 @@ But the workflow exports in `n8n-workflows/` currently contain their own node-le
 
 In other words: update workflow settings in n8n, not just `.env`, when you change workflow behavior.
 
+## Optional memory bridge
+
+This repo can also run a small `memory-bridge` container for AnythingLLM Agent Flows.
+
+- AnythingLLM calls `POST http://127.0.0.1:8787/save-memory`
+- the bridge injects `MEMORY_CAPTURE_TOKEN`
+- the bridge forwards the request to `n8n`
+- `n8n` runs the existing personal memory capture workflow
+
+Example request body from an AnythingLLM flow:
+
+```json
+{
+  "note": "Remember that I prefer concise answers unless I ask for more detail.",
+  "source": "anythingllm"
+}
+```
+
 ## n8n workflows
 
 The `n8n-workflows/` folder contains four baseline workflows:

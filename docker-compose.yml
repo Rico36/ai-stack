@@ -223,6 +223,23 @@ services:
     networks:
       - ai_net
 
+  memory-bridge:
+    build:
+      context: ./memory-bridge
+    container_name: memory-bridge
+    restart: unless-stopped
+    depends_on:
+      - n8n
+    environment:
+      PORT: "8787"
+      MEMORY_CAPTURE_TOKEN: ${MEMORY_CAPTURE_TOKEN}
+      N8N_MEMORY_WEBHOOK_URL: ${N8N_MEMORY_WEBHOOK_URL:-http://n8n:5678/webhook/local-ai/memory-capture}
+      MEMORY_BRIDGE_MAX_NOTE_LENGTH: ${MEMORY_BRIDGE_MAX_NOTE_LENGTH:-4000}
+    ports:
+      - "127.0.0.1:8787:8787"
+    networks:
+      - ai_net
+
 networks:
   ai_net:
     driver: bridge
