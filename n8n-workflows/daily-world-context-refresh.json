@@ -65,7 +65,7 @@
         "url": "http://ollama:11434/api/generate",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"model\": \"qwen3:14b\",\n  \"stream\": false,\n  \"prompt\": \"You are summarizing recent news for a local assistant. Produce concise markdown with sections: Top Developments, Why It Matters, Watchlist. Use only the provided search results, deduplicate overlap, avoid speculation, and keep it under 500 words.\\n\\nSearch results:\\n\\n\" + $json.bulletList\n}"
+        "jsonBody": "={{ JSON.stringify({ model: 'qwen3:14b', stream: false, prompt: 'You are summarizing recent news for a local assistant. Produce concise markdown with sections: Top Developments, Why It Matters, Watchlist. Use only the provided search results, deduplicate overlap, avoid speculation, and keep it under 500 words.\\n\\nSearch results:\\n\\n' + $json.bulletList }) }}"
       },
       "id": "summarize-world",
       "name": "Summarize With Ollama",
@@ -85,7 +85,7 @@
     },
     {
       "parameters": {
-        "command": "mkdir -p /data/assistant-memory/context && cat > /data/assistant-memory/context/daily_world_context.md <<'EOF'\n{{$json.markdown}}\nEOF"
+        "command": "={{ \"mkdir -p /data/assistant-memory/context && cat > /data/assistant-memory/context/daily_world_context.md <<'EOF'\\n\" + $json.markdown + \"\\nEOF\" }}"
       },
       "id": "write-world-file",
       "name": "Write World Context",
@@ -137,7 +137,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://host.docker.internal:3001/api/v1/workspace/REPLACE_WITH_WORKSPACE_SLUG/update-embeddings",
+        "url": "http://host.docker.internal:3001/api/v1/workspace/my-assistant/update-embeddings",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth"
       },

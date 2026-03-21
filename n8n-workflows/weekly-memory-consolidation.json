@@ -34,7 +34,7 @@
         "url": "http://ollama:11434/api/generate",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"model\": $env.OLLAMA_SUMMARY_MODEL || \"qwen2.5:7b-instruct-q4_K_M\",\n  \"stream\": false,\n  \"prompt\": \"You are consolidating personal assistant memory. Reduce duplicates, keep only high-value durable facts, preserve active projects and decisions, and refresh recent context. Return markdown with sections exactly named: IdentityAndPreferences, CurrentProjects, ActiveDecisions, EnvironmentAndTools, RecentContextSummary, ArchiveNotes.\\n\\nCurrent memory files:\\n\\n\" + ($json.stdout || '')\n}"
+        "jsonBody": "={{ JSON.stringify({ model: 'qwen3:14b', stream: false, prompt: 'You are consolidating personal assistant memory. Reduce duplicates, keep only high-value durable facts, preserve active projects and decisions, and refresh recent context. Return markdown with sections exactly named: IdentityAndPreferences, CurrentProjects, ActiveDecisions, EnvironmentAndTools, RecentContextSummary, ArchiveNotes.\\n\\nCurrent memory files:\\n\\n' + ($json.stdout || '') }) }}"
       },
       "id": "consolidate-with-ollama",
       "name": "Consolidate With Ollama",
@@ -54,7 +54,7 @@
     },
     {
       "parameters": {
-        "command": "mkdir -p /data/assistant-memory/archive /data/assistant-memory/backups/weekly && cp /data/assistant-memory/memory/*.md /data/assistant-memory/backups/weekly/ 2>/dev/null || true\ncat > /data/assistant-memory/memory/identity_and_preferences.md <<'EOF'\n{{$json.identity}}\nEOF\ncat > /data/assistant-memory/memory/current_projects.md <<'EOF'\n{{$json.projects}}\nEOF\ncat > /data/assistant-memory/memory/active_decisions.md <<'EOF'\n{{$json.decisions}}\nEOF\ncat > /data/assistant-memory/memory/environment_and_tools.md <<'EOF'\n{{$json.tools}}\nEOF\ncat > /data/assistant-memory/memory/recent_context_summary.md <<'EOF'\n{{$json.recent}}\nEOF\ncat > /data/assistant-memory/archive/consolidation-{{$json.now}}.md <<'EOF'\n# Weekly Consolidation Notes\n\n{{$json.archive}}\nEOF"
+        "command": "={{ \"mkdir -p /data/assistant-memory/archive /data/assistant-memory/backups/weekly && cp /data/assistant-memory/memory/*.md /data/assistant-memory/backups/weekly/ 2>/dev/null || true\\n\" + \"cat > /data/assistant-memory/memory/identity_and_preferences.md <<'EOF'\\n\" + $json.identity + \"\\nEOF\\n\" + \"cat > /data/assistant-memory/memory/current_projects.md <<'EOF'\\n\" + $json.projects + \"\\nEOF\\n\" + \"cat > /data/assistant-memory/memory/active_decisions.md <<'EOF'\\n\" + $json.decisions + \"\\nEOF\\n\" + \"cat > /data/assistant-memory/memory/environment_and_tools.md <<'EOF'\\n\" + $json.tools + \"\\nEOF\\n\" + \"cat > /data/assistant-memory/memory/recent_context_summary.md <<'EOF'\\n\" + $json.recent + \"\\nEOF\\n\" + \"cat > /data/assistant-memory/archive/consolidation-\" + $json.now + \".md <<'EOF'\\n# Weekly Consolidation Notes\\n\\n\" + $json.archive + \"\\nEOF\" }}"
       },
       "id": "write-consolidated-files",
       "name": "Write Consolidated Memory",
@@ -86,16 +86,9 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{($env.ANYTHINGLLM_API_BASE || 'http://host.docker.internal:3001') + '/api/v1/document/upload/' + ($env.ANYTHINGLLM_UPLOAD_FOLDER || 'assistant-memory')}}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "=Bearer {{$env.ANYTHINGLLM_API_KEY}}"
-            }
-          ]
-        },
+        "url": "http://host.docker.internal:3001/api/v1/document/upload",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "contentType": "multipart-form-data",
         "bodyParameters": {
@@ -112,7 +105,13 @@
       "name": "Upload Consolidated File",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2200, 280]
+      "position": [2200, 280],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__SET_IN_N8N__",
+          "name": "AnythingLLM API Key"
+        }
+      }
     },
     {
       "parameters": {
@@ -127,22 +126,21 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{($env.ANYTHINGLLM_API_BASE || 'http://host.docker.internal:3001') + '/api/v1/workspace/' + $env.ANYTHINGLLM_WORKSPACE_SLUG + '/update-embeddings'}}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "=Bearer {{$env.ANYTHINGLLM_API_KEY}}"
-            }
-          ]
-        }
+        "url": "http://host.docker.internal:3001/api/v1/workspace/my-assistant/update-embeddings",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
       },
       "id": "refresh-consolidated-embeddings",
       "name": "Refresh Workspace Embeddings",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2720, 280]
+      "position": [2720, 280],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__SET_IN_N8N__",
+          "name": "AnythingLLM API Key"
+        }
+      }
     }
   ],
   "pinData": {},
@@ -161,5 +159,5 @@
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "weekly-memory-consolidation-v2"
+  "versionId": "weekly-memory-consolidation-v3"
 }

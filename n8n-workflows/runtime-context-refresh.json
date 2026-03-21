@@ -30,7 +30,7 @@
     },
     {
       "parameters": {
-        "command": "mkdir -p /data/assistant-memory/context && cat > /data/assistant-memory/context/runtime_context.md <<'EOF'\n{{$json.markdown}}\nEOF"
+        "command": "={{ \"mkdir -p /data/assistant-memory/context && cat > /data/assistant-memory/context/runtime_context.md <<'EOF'\\n\" + $json.markdown + \"\\nEOF\" }}"
       },
       "id": "write-runtime-file",
       "name": "Write Runtime File",
@@ -82,7 +82,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://host.docker.internal:3001/api/v1/workspace/REPLACE_WITH_WORKSPACE_SLUG/update-embeddings",
+        "url": "http://host.docker.internal:3001/api/v1/workspace/my-assistant/update-embeddings",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth"
       },

@@ -17,7 +17,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const body = $json.body || {};\nconst note = body.note || body.text || '';\nconst source = body.source || 'manual';\nconst token = body.token || '';\nif (!note.trim()) throw new Error('Memory note is required.');\nif (($env.MEMORY_CAPTURE_TOKEN || '').trim() && token !== $env.MEMORY_CAPTURE_TOKEN) throw new Error('Unauthorized memory capture request.');\nconst stamp = new Date().toISOString();\nconst slug = stamp.replace(/[:.]/g, '-');\nreturn [{ json: { note, source, stamp, slug } }];"
+        "jsCode": "const body = $json.body || {};\nconst note = body.note || body.text || '';\nconst source = body.source || 'manual';\nconst token = body.token || '';\nconst expectedToken = 'REPLACE_WITH_MEMORY_CAPTURE_TOKEN';\nif (!note.trim()) throw new Error('Memory note is required.');\nif (expectedToken !== 'REPLACE_WITH_MEMORY_CAPTURE_TOKEN' && token !== expectedToken) throw new Error('Unauthorized memory capture request.');\nconst stamp = new Date().toISOString();\nconst slug = stamp.replace(/[:.]/g, '-');\nreturn [{ json: { note, source, stamp, slug } }];"
       },
       "id": "validate-request",
       "name": "Validate Request",
@@ -27,7 +27,7 @@
     },
     {
       "parameters": {
-        "command": "mkdir -p /data/assistant-memory/inbox/raw && cat > /data/assistant-memory/inbox/raw/{{$json.slug}}.md <<'EOF'\n# Memory Capture\n\n- Captured at: {{$json.stamp}}\n- Source: {{$json.source}}\n\n## Raw Note\n\n{{$json.note}}\nEOF"
+        "command": "={{ \"mkdir -p /data/assistant-memory/inbox/raw && cat > /data/assistant-memory/inbox/raw/\" + $json.slug + \".md <<'EOF'\\n# Memory Capture\\n\\n- Captured at: \" + $json.stamp + \"\\n- Source: \" + $json.source + \"\\n\\n## Raw Note\\n\\n\" + $json.note + \"\\nEOF\" }}"
       },
       "id": "write-raw-note",
       "name": "Write Raw Inbox Note",
@@ -41,7 +41,7 @@
         "url": "http://ollama:11434/api/generate",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"model\": $env.OLLAMA_SUMMARY_MODEL || \"qwen2.5:7b-instruct-q4_K_M\",\n  \"stream\": false,\n  \"prompt\": \"Classify and summarize this personal memory note for a local assistant. Return markdown with these headings exactly: Summary, Durability, TargetFile, ProposedUpdate. TargetFile must be one of identity_and_preferences.md, current_projects.md, active_decisions.md, environment_and_tools.md, recent_context_summary.md. Keep it concise and do not invent details.\\n\\nNote:\\n\" + $node['Validate Request'].json.note\n}"
+        "jsonBody": "={{ JSON.stringify({ model: 'qwen3:14b', stream: false, prompt: 'Classify and summarize this personal memory note for a local assistant. Return markdown with these headings exactly: Summary, Durability, TargetFile, ProposedUpdate. TargetFile must be one of identity_and_preferences.md, current_projects.md, active_decisions.md, environment_and_tools.md, recent_context_summary.md. Keep it concise and do not invent details.\\n\\nNote:\\n' + $node['Validate Request'].json.note }) }}"
       },
       "id": "summarize-memory",
       "name": "Summarize Memory With Ollama",
@@ -61,7 +61,7 @@
     },
     {
       "parameters": {
-        "command": "mkdir -p /data/assistant-memory/memory /data/assistant-memory/inbox/processed && cat >> /data/assistant-memory/memory/{{$json.safeFile}} <<'EOF'\n{{$json.appendix}}\nEOF\ncat > /data/assistant-memory/inbox/processed/{{$json.slug}}.md <<'EOF'\n# Processed Memory Capture\n\n- Captured at: {{$json.stamp}}\n- Source: {{$json.source}}\n- Target file: {{$json.safeFile}}\n\n{{$json.response}}\nEOF"
+        "command": "={{ \"mkdir -p /data/assistant-memory/memory /data/assistant-memory/inbox/processed && cat >> /data/assistant-memory/memory/\" + $json.safeFile + \" <<'EOF'\\n\" + $json.appendix + \"\\nEOF\\n\" + \"cat > /data/assistant-memory/inbox/processed/\" + $json.slug + \".md <<'EOF'\\n# Processed Memory Capture\\n\\n- Captured at: \" + $json.stamp + \"\\n- Source: \" + $json.source + \"\\n- Target file: \" + $json.safeFile + \"\\n\\n\" + $json.response + \"\\nEOF\" }}"
       },
       "id": "apply-memory-update",
       "name": "Apply Memory Update",
@@ -71,7 +71,7 @@
     },
     {
       "parameters": {
-        "filePath": "={{$json.filePath}}",
+        "filePath": "={{$node['Prepare Memory Update'].json.filePath}}",
         "dataPropertyName": "data"
       },
       "id": "read-updated-file",
@@ -83,16 +83,9 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{($env.ANYTHINGLLM_API_BASE || 'http://host.docker.internal:3001') + '/api/v1/document/upload/' + ($env.ANYTHINGLLM_UPLOAD_FOLDER || 'assistant-memory')}}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "=Bearer {{$env.ANYTHINGLLM_API_KEY}}"
-            }
-          ]
-        },
+        "url": "http://host.docker.internal:3001/api/v1/document/upload",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "contentType": "multipart-form-data",
         "bodyParameters": {
@@ -109,32 +102,37 @@
       "name": "Upload To AnythingLLM",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2020, 340]
+      "position": [2020, 340],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__SET_IN_N8N__",
+          "name": "AnythingLLM API Key"
+        }
+      }
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{($env.ANYTHINGLLM_API_BASE || 'http://host.docker.internal:3001') + '/api/v1/workspace/' + $env.ANYTHINGLLM_WORKSPACE_SLUG + '/update-embeddings'}}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "=Bearer {{$env.ANYTHINGLLM_API_KEY}}"
-            }
-          ]
-        }
+        "url": "http://host.docker.internal:3001/api/v1/workspace/my-assistant/update-embeddings",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
       },
       "id": "refresh-memory-embeddings",
       "name": "Refresh Workspace Embeddings",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2280, 340]
+      "position": [2280, 340],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__SET_IN_N8N__",
+          "name": "AnythingLLM API Key"
+        }
+      }
     },
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={\"status\":\"ok\",\"captured_at\":\"{{$json.stamp}}\",\"target_file\":\"{{$json.safeFile}}\",\"embeddings_refreshed\":true}"
+        "responseBody": "={{ JSON.stringify({ status: 'ok', captured_at: $node['Prepare Memory Update'].json.stamp, target_file: $node['Prepare Memory Update'].json.safeFile, embeddings_refreshed: true }) }}"
       },
       "id": "return-response",
       "name": "Return Success",
@@ -159,5 +157,5 @@
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "personal-memory-capture-v2"
+  "versionId": "personal-memory-capture-v3"
 }
