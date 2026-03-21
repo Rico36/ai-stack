@@ -52,16 +52,9 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{($env.ANYTHINGLLM_API_BASE || 'http://host.docker.internal:3001') + '/api/v1/document/upload/' + ($env.ANYTHINGLLM_UPLOAD_FOLDER || 'assistant-memory')}}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "=Bearer {{$env.ANYTHINGLLM_API_KEY}}"
-            }
-          ]
-        },
+        "url": "http://host.docker.internal:3001/api/v1/document/upload",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "contentType": "multipart-form-data",
         "bodyParameters": {
@@ -78,27 +71,32 @@
       "name": "Upload Runtime Context",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1520, 180]
+      "position": [1520, 180],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__SET_IN_N8N__",
+          "name": "AnythingLLM API Key"
+        }
+      }
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{($env.ANYTHINGLLM_API_BASE || 'http://host.docker.internal:3001') + '/api/v1/workspace/' + $env.ANYTHINGLLM_WORKSPACE_SLUG + '/update-embeddings'}}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "=Bearer {{$env.ANYTHINGLLM_API_KEY}}"
-            }
-          ]
-        }
+        "url": "http://host.docker.internal:3001/api/v1/workspace/REPLACE_WITH_WORKSPACE_SLUG/update-embeddings",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
       },
       "id": "refresh-runtime-embeddings",
       "name": "Refresh Runtime Embeddings",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1760, 180]
+      "position": [1760, 180],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__SET_IN_N8N__",
+          "name": "AnythingLLM API Key"
+        }
+      }
     }
   ],
   "pinData": {},
@@ -123,5 +121,5 @@
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "runtime-context-v2"
+  "versionId": "runtime-context-v3"
 }

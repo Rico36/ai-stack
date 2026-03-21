@@ -51,7 +51,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const rows = $input.all();\nconst dedupe = new Map();\nfor (const row of rows) {\n  const bucket = row.json.key || 'general';\n  const results = row.json.results || [];\n  for (const result of results.slice(0, 6)) {\n    const url = result.url || result.link;\n    const title = result.title || 'Untitled';\n    const snippet = result.content || result.snippet || '';\n    if (!url || dedupe.has(url)) continue;\n    dedupe.set(url, { bucket, title, snippet, url });\n  }\n}\nconst items = Array.from(dedupe.values()).slice(0, Number($env.WORLD_CONTEXT_MAX_ITEMS || 12));\nconst bulletList = items.map((item, index) => `${index + 1}. [${item.bucket}] ${item.title}\\nURL: ${item.url}\\nSnippet: ${item.snippet}`).join('\\n\\n');\nreturn [{ json: { bulletList, filePath: '/data/assistant-memory/context/daily_world_context.md' } }];"
+        "jsCode": "const rows = $input.all();\nconst dedupe = new Map();\nfor (const row of rows) {\n  const bucket = row.json.key || 'general';\n  const results = row.json.results || [];\n  for (const result of results.slice(0, 6)) {\n    const url = result.url || result.link;\n    const title = result.title || 'Untitled';\n    const snippet = result.content || result.snippet || '';\n    if (!url || dedupe.has(url)) continue;\n    dedupe.set(url, { bucket, title, snippet, url });\n  }\n}\nconst items = Array.from(dedupe.values()).slice(0, 12);\nconst bulletList = items.map((item, index) => `${index + 1}. [${item.bucket}] ${item.title}\\nURL: ${item.url}\\nSnippet: ${item.snippet}`).join('\\n\\n');\nreturn [{ json: { bulletList, filePath: '/data/assistant-memory/context/daily_world_context.md' } }];"
       },
       "id": "dedupe-results",
       "name": "Dedupe Results",
@@ -65,7 +65,7 @@
         "url": "http://ollama:11434/api/generate",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"model\": $env.OLLAMA_SUMMARY_MODEL || \"qwen2.5:7b-instruct-q4_K_M\",\n  \"stream\": false,\n  \"prompt\": \"You are summarizing recent news for a local assistant. Produce concise markdown with sections: Top Developments, Why It Matters, Watchlist. Use only the provided search results, deduplicate overlap, avoid speculation, and keep it under 500 words.\\n\\nSearch results:\\n\\n\" + $json.bulletList\n}"
+        "jsonBody": "={\n  \"model\": \"qwen3:14b\",\n  \"stream\": false,\n  \"prompt\": \"You are summarizing recent news for a local assistant. Produce concise markdown with sections: Top Developments, Why It Matters, Watchlist. Use only the provided search results, deduplicate overlap, avoid speculation, and keep it under 500 words.\\n\\nSearch results:\\n\\n\" + $json.bulletList\n}"
       },
       "id": "summarize-world",
       "name": "Summarize With Ollama",
@@ -95,7 +95,7 @@
     },
     {
       "parameters": {
-        "filePath": "={{$json.filePath}}",
+        "filePath": "/data/assistant-memory/context/daily_world_context.md",
         "dataPropertyName": "data"
       },
       "id": "read-world-file",
@@ -107,16 +107,9 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{($env.ANYTHINGLLM_API_BASE || 'http://host.docker.internal:3001') + '/api/v1/document/upload/' + ($env.ANYTHINGLLM_UPLOAD_FOLDER || 'assistant-memory')}}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "=Bearer {{$env.ANYTHINGLLM_API_KEY}}"
-            }
-          ]
-        },
+        "url": "http://host.docker.internal:3001/api/v1/document/upload",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "contentType": "multipart-form-data",
         "bodyParameters": {
@@ -133,27 +126,32 @@
       "name": "Upload World Context",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2300, 300]
+      "position": [2300, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__SET_IN_N8N__",
+          "name": "AnythingLLM API Key"
+        }
+      }
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{($env.ANYTHINGLLM_API_BASE || 'http://host.docker.internal:3001') + '/api/v1/workspace/' + $env.ANYTHINGLLM_WORKSPACE_SLUG + '/update-embeddings'}}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "=Bearer {{$env.ANYTHINGLLM_API_KEY}}"
-            }
-          ]
-        }
+        "url": "http://host.docker.internal:3001/api/v1/workspace/REPLACE_WITH_WORKSPACE_SLUG/update-embeddings",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
       },
       "id": "refresh-world-embeddings",
       "name": "Refresh Workspace Embeddings",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2560, 300]
+      "position": [2560, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "__SET_IN_N8N__",
+          "name": "AnythingLLM API Key"
+        }
+      }
     }
   ],
   "pinData": {},
@@ -172,5 +170,5 @@
   "settings": {
     "executionOrder": "v1"
   },
-  "versionId": "daily-world-context-v2"
+  "versionId": "daily-world-context-v3"
 }
