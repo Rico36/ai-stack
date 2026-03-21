@@ -41,7 +41,7 @@
         "url": "http://ollama:11434/api/generate",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ model: 'qwen3:14b', stream: false, prompt: 'Classify and summarize this personal memory note for a local assistant. Return markdown with these headings exactly: Summary, Durability, TargetFile, ProposedUpdate. TargetFile must be one of identity_and_preferences.md, current_projects.md, active_decisions.md, environment_and_tools.md, recent_context_summary.md. Keep it concise and do not invent details.\\n\\nNote:\\n' + $node['Validate Request'].json.note }) }}"
+        "jsonBody": "={{ JSON.stringify({ model: 'qwen2.5:7b-instruct-q4_K_M', stream: false, prompt: 'Classify and summarize this personal memory note for a local assistant. Return markdown with these headings exactly: Summary, Durability, TargetFile, ProposedUpdate. TargetFile must be one of identity_and_preferences.md, current_projects.md, active_decisions.md, environment_and_tools.md, recent_context_summary.md. Keep it concise and do not invent details.\\n\\nNote:\\n' + $node['Validate Request'].json.note }) }}"
       },
       "id": "summarize-memory",
       "name": "Summarize Memory With Ollama",

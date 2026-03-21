@@ -34,7 +34,7 @@
         "url": "http://ollama:11434/api/generate",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ model: 'qwen3:14b', stream: false, prompt: 'You are consolidating personal assistant memory. Reduce duplicates, keep only high-value durable facts, preserve active projects and decisions, and refresh recent context. Return markdown with sections exactly named: IdentityAndPreferences, CurrentProjects, ActiveDecisions, EnvironmentAndTools, RecentContextSummary, ArchiveNotes.\\n\\nCurrent memory files:\\n\\n' + ($json.stdout || '') }) }}"
+        "jsonBody": "={{ JSON.stringify({ model: 'qwen2.5:7b-instruct-q4_K_M', stream: false, prompt: 'You are consolidating personal assistant memory. Reduce duplicates, keep only high-value durable facts, preserve active projects and decisions, and refresh recent context. Return markdown with sections exactly named: IdentityAndPreferences, CurrentProjects, ActiveDecisions, EnvironmentAndTools, RecentContextSummary, ArchiveNotes.\\n\\nCurrent memory files:\\n\\n' + ($json.stdout || '') }) }}"
       },
       "id": "consolidate-with-ollama",
       "name": "Consolidate With Ollama",
