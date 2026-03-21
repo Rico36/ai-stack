@@ -123,11 +123,12 @@ services:
     environment:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
-      OLLAMA_KEEP_ALIVE: "15m"
+      OLLAMA_KEEP_ALIVE: "2m"
       OLLAMA_FLASH_ATTENTION: 1
       OLLAMA_KV_CACHE_TYPE: q8_0
-      OLLAMA_NUM_CTX: 8192    # OLLAMA_NUM_CTX=16384
-      OLLAMA_MAX_LOADED_MODELS: 2
+      OLLAMA_NUM_CTX: 4092    # OLLAMA_NUM_CTX= (8192 or 16384)
+      OLLAMA_NUM_PARALLEL: 1
+      OLLAMA_MAX_LOADED_MODELS: 1
     networks:
       - ai_net
       
