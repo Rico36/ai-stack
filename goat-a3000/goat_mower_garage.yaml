@@ -15,6 +15,32 @@ input_boolean:
     name: GOAT Mowing Session Active
     icon: mdi:robot-mower
 
+  goat_schedule_mon:
+    name: GOAT Schedule Monday
+    icon: mdi:calendar-week
+  goat_schedule_tue:
+    name: GOAT Schedule Tuesday
+    icon: mdi:calendar-week
+  goat_schedule_wed:
+    name: GOAT Schedule Wednesday
+    icon: mdi:calendar-week
+  goat_schedule_thu:
+    name: GOAT Schedule Thursday
+    icon: mdi:calendar-week
+  goat_schedule_fri:
+    name: GOAT Schedule Friday
+    icon: mdi:calendar-week
+  goat_schedule_sat:
+    name: GOAT Schedule Saturday
+    icon: mdi:calendar-week
+  goat_schedule_sun:
+    name: GOAT Schedule Sunday
+    icon: mdi:calendar-week
+
+  goat_makeup_pending:
+    name: GOAT Makeup Mow Pending
+    icon: mdi:calendar-refresh
+
 
 input_select:
   goat_mow_mode:
@@ -244,6 +270,10 @@ script:
                 - input_boolean.goat_departure_window_active
                 - input_boolean.goat_mowing_session_active
 
+          - service: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.goat_makeup_pending
+
           - service: input_text.set_value
             target:
               entity_id: input_text.goat_last_mowing_status
@@ -258,14 +288,14 @@ script:
 
           - service: script.goat_notify
             data:
-              title: "Mowing cancelled"
+              title: "Mowing cancelled — makeup pending"
               message: >
                 {% if states('sensor.front_rain_sensor_soil_moisture') | float(100) >= 55 %}
-                  Mowing cancelled — grass is too wet (soil moisture {{ states('sensor.front_rain_sensor_soil_moisture') | round(1) }}%).
+                  Mowing cancelled — grass is too wet ({{ states('sensor.front_rain_sensor_soil_moisture') | round(1) }}%). Will attempt a makeup mow when conditions clear.
                 {% elif states('sensor.goat_a3000_lidar_error') | int(0) != 0 %}
-                  Mowing cancelled — mower has an active error.
+                  Mowing cancelled — mower has an active error. Will attempt a makeup mow when resolved.
                 {% else %}
-                  Mowing cancelled — rain forecast in next 95 minutes.
+                  Mowing cancelled — rain forecast in next 95 minutes. Will attempt a makeup mow when conditions clear.
                 {% endif %}
 
   goat_test_weather_check:
@@ -467,12 +497,19 @@ automation:
         entity_id: input_boolean.goat_automation_enabled
         state: "on"
 
-      - condition: time
-        weekday:
-          - sun
-          - tue
-          - thu
-          - sat
+      - condition: template
+        value_template: >
+          {% set day = now().isoweekday() - 1 %}
+          {% set days = [
+            states('input_boolean.goat_schedule_mon'),
+            states('input_boolean.goat_schedule_tue'),
+            states('input_boolean.goat_schedule_wed'),
+            states('input_boolean.goat_schedule_thu'),
+            states('input_boolean.goat_schedule_fri'),
+            states('input_boolean.goat_schedule_sat'),
+            states('input_boolean.goat_schedule_sun'),
+          ] %}
+          {{ days[day] == 'on' }}
 
     action:
       - service: script.goat_mowing_start
@@ -716,12 +753,6 @@ automation:
         entity_id: input_boolean.goat_mowing_session_active
         state: "on"
 
-      - condition: time
-        weekday:
-          - sat
-          - sun
-          - tue
-          - thu
     action:
       - service: script.goat_notify
         data:
@@ -760,6 +791,7 @@ automation:
           entity_id:
             - input_boolean.goat_departure_window_active
             - input_boolean.goat_mowing_session_active
+            - input_boolean.goat_makeup_pending
 
       - service: script.goat_notify
         data:
@@ -803,3 +835,132 @@ automation:
           title: "Mower not docked"
           message: "The robot mower has not reported docked status within 2 hours of scheduled mowing start. Check mower and garage."
           critical: true
+
+  - alias: GOAT - Makeup Day Check
+    id: goat_makeup_day_check
+    mode: single
+    trigger:
+      - platform: time_pattern
+        hours: "/1"
+        minutes: "0"
+    condition:
+      - condition: state
+        entity_id: input_boolean.goat_automation_enabled
+        state: "on"
+      - condition: state
+        entity_id: input_boolean.goat_makeup_pending
+        state: "on"
+      - condition: state
+        entity_id: input_boolean.goat_mowing_session_active
+        state: "off"
+      - condition: time
+        after: "11:00:00"
+        before: "19:00:00"
+      - condition: template
+        value_template: >
+          {% set day = now().isoweekday() - 1 %}
+          {% set days = [
+            states('input_boolean.goat_schedule_mon'),
+            states('input_boolean.goat_schedule_tue'),
+            states('input_boolean.goat_schedule_wed'),
+            states('input_boolean.goat_schedule_thu'),
+            states('input_boolean.goat_schedule_fri'),
+            states('input_boolean.goat_schedule_sat'),
+            states('input_boolean.goat_schedule_sun'),
+          ] %}
+          {{ days[day] != 'on' }}
+    action:
+      - service: weather.get_forecasts
+        target:
+          entity_id: weather.pirateweather
+        data:
+          type: hourly
+        response_variable: goat_weather_forecast
+
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ states('sensor.goat_a3000_lidar_error') | int(0) == 0 }}
+              - condition: template
+                value_template: >
+                  {{ states('sensor.front_rain_sensor_soil_moisture') | float(100) < 55 }}
+              - condition: template
+                value_template: >
+                  {% set start = now() %}
+                  {% set end = start + timedelta(minutes=95) %}
+                  {% set ns = namespace(block=false) %}
+                  {% for item in goat_weather_forecast['weather.pirateweather'].forecast %}
+                    {% set dt = as_datetime(item.datetime).astimezone(now().tzinfo) %}
+                    {% set pop = item.precipitation_probability | int(0) %}
+                    {% set condition = item.condition %}
+                    {% if start <= dt <= end and (
+                      pop >= 40 or condition in ['rainy','pouring','lightning','lightning-rainy']
+                    ) %}
+                      {% set ns.block = true %}
+                    {% endif %}
+                  {% endfor %}
+                  {{ not ns.block }}
+            sequence:
+              - if:
+                  - condition: template
+                    value_template: "{{ states('input_select.goat_mow_mode').startswith('Areas') }}"
+                then:
+                  - service: shell_command.goat_write_zones
+                  - delay:
+                      milliseconds: 500
+
+              - service: input_text.set_value
+                target:
+                  entity_id: input_text.goat_last_mowing_status
+                data:
+                  value: "Makeup"
+
+              - service: input_datetime.set_datetime
+                target:
+                  entity_id: input_datetime.goat_last_mowing_decision
+                data:
+                  datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+              - service: input_boolean.turn_on
+                target:
+                  entity_id:
+                    - input_boolean.goat_departure_window_active
+                    - input_boolean.goat_mowing_session_active
+
+              - service: input_datetime.set_datetime
+                target:
+                  entity_id: input_datetime.goat_mowing_session_started_at
+                data:
+                  datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+              - service: script.goat_open_garage
+
+              - service: lawn_mower.start_mowing
+                target:
+                  entity_id: lawn_mower.goat_a3000_lidar
+
+              - service: script.goat_notify
+                data:
+                  title: "Makeup mow started"
+                  message: >
+                    Conditions cleared — starting makeup mow.
+                    Mode: {{ states('input_select.goat_mow_mode') }}.
+
+        default:
+          - if:
+              - condition: time
+                after: "11:00:00"
+                before: "12:00:00"
+            then:
+              - service: script.goat_notify
+                data:
+                  title: "Makeup mow waiting"
+                  message: >
+                    {% if states('sensor.front_rain_sensor_soil_moisture') | float(100) >= 55 %}
+                      Makeup mow pending — grass too wet ({{ states('sensor.front_rain_sensor_soil_moisture') | round(1) }}%). Will retry hourly until 7 pm.
+                    {% elif states('sensor.goat_a3000_lidar_error') | int(0) != 0 %}
+                      Makeup mow pending — mower has an active error. Will retry hourly until 7 pm.
+                    {% else %}
+                      Makeup mow pending — rain forecast. Will retry hourly until 7 pm.
+                    {% endif %}
