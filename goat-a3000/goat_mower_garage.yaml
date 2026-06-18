@@ -1,0 +1,805 @@
+input_boolean:
+  goat_automation_enabled:
+    name: GOAT Automation Enabled
+    icon: mdi:robot-mower
+
+  goat_garage_managed_open:
+    name: GOAT Garage Managed Open
+    icon: mdi:garage-open
+
+  goat_departure_window_active:
+    name: GOAT Departure Window Active
+    icon: mdi:garage-alert
+
+  goat_mowing_session_active:
+    name: GOAT Mowing Session Active
+    icon: mdi:robot-mower
+
+
+input_select:
+  goat_mow_mode:
+    name: GOAT Mow Mode
+    options:
+      - "Areas (e.g., 3,2,6,4,7,5)"
+      - "Full Map (Auto)"
+    icon: mdi:map
+
+
+input_datetime:
+  goat_mowing_start_time:
+    name: GOAT Mowing Start Time
+    has_date: false
+    has_time: true
+
+  goat_mowing_session_started_at:
+    name: GOAT Mowing Session Started At
+    has_date: true
+    has_time: true
+
+  goat_last_mowing_decision:
+    name: GOAT Last Mowing Decision
+    has_date: true
+    has_time: true
+
+input_text:
+  goat_last_mowing_status:
+    name: GOAT Last Mowing Status
+    max: 255
+
+  goat_zone_ids:
+    # This are my zone areas defined in the Ecovacs APP  Area Mowing page.
+    # Internally the library uses zone IDs and not the actual zone area numbers shown in the Ecovac app.
+    # To find your zone IDs, enable debug log for the mower in HA, run the mower using areas from the app and
+    # look in the logs for this line:  onCleanInfo ... "type": "spotArea", "value": "3,2,6,4,7,5"
+    # Where the first number "3" in this example, is Area 1, "2" is Area 2, "6" is Area 3, etc.
+    # These numbers can/will be different in your own App environment.
+    name: GOAT Zone IDs
+    initial: "3,2,6,4,7,5"
+    max: 30
+
+shell_command:
+  # Writes selected zone IDs to a temp file inside the container.
+  # CleanMowerArea reads this file once when start_mowing is called.
+  # Zone IDs: 2=Front Street, 3=Front, 4=Left Side Street,
+  #           5=Backyard Side, 6=Left Side, 7=Backyard
+  goat_write_zones: "python3 -c \"open('/tmp/goat_zones', 'w').write('{{ states(\"input_text.goat_zone_ids\") }}')\""
+
+script:
+  goat_notify:
+    alias: GOAT - Notify
+    mode: queued
+    fields:
+      title:
+        description: Notification title
+      message:
+        description: Notification message
+      critical:
+        description: "Send as critical alert that bypasses Do Not Disturb (default: false)"
+    sequence:
+      - service: notify.house_phones
+        data:
+          title: "{{ title }}"
+          message: "{{ message }}"
+          data:
+            push:
+              sound:
+                name: default
+                critical: "{{ 1 if critical | default(false) else 0 }}"
+                volume: "{{ 1.0 if critical | default(false) else 0.5 }}"
+
+  goat_open_garage:
+    alias: GOAT - Open Garage
+    mode: single
+    sequence:
+      - service: cover.open_cover
+        target:
+          entity_id: cover.garage_door
+
+      - wait_template: "{{ is_state('cover.garage_door', 'open') }}"
+        timeout: "00:01:00"
+        continue_on_timeout: true
+
+      - choose:
+          - conditions:
+              - condition: state
+                entity_id: cover.garage_door
+                state: "open"
+            sequence:
+              - service: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.goat_garage_managed_open
+        default:
+          - service: script.goat_notify
+            data:
+              title: "Garage failed to open"
+              message: "Garage door did not report open within 1 minute. Check garage before Mower moves."
+              critical: true
+
+  goat_close_garage:
+    alias: GOAT - Close Garage
+    mode: single
+    sequence:
+      - condition: state
+        entity_id: input_boolean.goat_garage_managed_open
+        state: "on"
+
+      - service: cover.close_cover
+        target:
+          entity_id: cover.garage_door
+
+      - wait_template: "{{ is_state('cover.garage_door', 'closed') }}"
+        timeout: "00:01:00"
+        continue_on_timeout: true
+
+      - choose:
+          - conditions:
+              - condition: state
+                entity_id: cover.garage_door
+                state: "closed"
+            sequence:
+              - service: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.goat_garage_managed_open
+        default:
+          - service: script.goat_notify
+            data:
+              title: "Garage failed to close"
+              message: "Garage door did not report closed within 1 minute. Please check it."
+              critical: true
+
+  goat_try_dock:
+    alias: GOAT - Try Dock
+    mode: single
+    sequence:
+      - service: lawn_mower.dock
+        target:
+          entity_id: lawn_mower.goat_a3000_lidar
+      - delay: "00:00:20"
+      - service: lawn_mower.dock
+        target:
+          entity_id: lawn_mower.goat_a3000_lidar
+
+  goat_mowing_start:
+    alias: GOAT - Mowing Start
+    mode: single
+    sequence:
+      - delay:
+          seconds: 10
+
+      - service: homeassistant.update_entity
+        target:
+          entity_id:
+            - sensor.goat_a3000_lidar_error
+            - lawn_mower.goat_a3000_lidar
+
+      - service: weather.get_forecasts
+        target:
+          entity_id: weather.pirateweather
+        data:
+          type: hourly
+        response_variable: goat_weather_forecast
+
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ states('sensor.goat_a3000_lidar_error') | int(0) == 0 }}
+              - condition: template
+                value_template: >
+                  {{ states('sensor.front_rain_sensor_soil_moisture') | float(100) < 55 }}
+              - condition: template
+                value_template: >
+                  {% set start = now() %}
+                  {% set end = start + timedelta(minutes=95) %}
+                  {% set ns = namespace(block=false) %}
+                  {% for item in goat_weather_forecast['weather.pirateweather'].forecast %}
+                    {% set dt = as_datetime(item.datetime).astimezone(now().tzinfo) %}
+                    {% set pop = item.precipitation_probability | int(0) %}
+                    {% set condition = item.condition %}
+                    {% if start <= dt <= end and (
+                      pop >= 40 or condition in ['rainy','pouring','lightning','lightning-rainy']
+                    ) %}
+                      {% set ns.block = true %}
+                    {% endif %}
+                  {% endfor %}
+                  {{ not ns.block }}
+            sequence:
+              - service: input_text.set_value
+                target:
+                  entity_id: input_text.goat_last_mowing_status
+                data:
+                  value: "Normal"
+
+              - service: input_datetime.set_datetime
+                target:
+                  entity_id: input_datetime.goat_last_mowing_decision
+                data:
+                  datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+              - service: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.goat_departure_window_active
+
+              - service: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.goat_mowing_session_active
+
+              - service: input_datetime.set_datetime
+                target:
+                  entity_id: input_datetime.goat_mowing_session_started_at
+                data:
+                  datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+              - service: script.goat_open_garage
+
+              - service: script.goat_notify
+                data:
+                  title: "Garage opened for mower."
+                  message: "Garage just opened for scheduled mowing start."
+
+        default:
+          - service: input_boolean.turn_off
+            target:
+              entity_id:
+                - input_boolean.goat_departure_window_active
+                - input_boolean.goat_mowing_session_active
+
+          - service: input_text.set_value
+            target:
+              entity_id: input_text.goat_last_mowing_status
+            data:
+              value: "Cancelled due to weather"
+
+          - service: input_datetime.set_datetime
+            target:
+              entity_id: input_datetime.goat_last_mowing_decision
+            data:
+              datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+          - service: script.goat_notify
+            data:
+              title: "Mowing cancelled"
+              message: >
+                {% if states('sensor.front_rain_sensor_soil_moisture') | float(100) >= 55 %}
+                  Mowing cancelled — grass is too wet (soil moisture {{ states('sensor.front_rain_sensor_soil_moisture') | round(1) }}%).
+                {% elif states('sensor.goat_a3000_lidar_error') | int(0) != 0 %}
+                  Mowing cancelled — mower has an active error.
+                {% else %}
+                  Mowing cancelled — rain forecast in next 95 minutes.
+                {% endif %}
+
+  goat_test_weather_check:
+    alias: GOAT - Test Weather Check
+    mode: single
+    sequence:
+      - service: weather.get_forecasts
+        target:
+          entity_id: weather.pirateweather
+        data:
+          type: hourly
+        response_variable: forecast_data
+
+      - variables:
+          soil_moisture: "{{ states('sensor.front_rain_sensor_soil_moisture') | float(100) }}"
+          mower_error: "{{ states('sensor.goat_a3000_lidar_error') | int(0) }}"
+
+      - variables:
+          forecast_slots: >
+            {% set start = now() %}
+            {% set end = start + timedelta(minutes=95) %}
+            {% set ns = namespace(lines=[]) %}
+            {% for item in forecast_data['weather.pirateweather'].forecast %}
+              {% set dt = as_datetime(item.datetime).astimezone(now().tzinfo) %}
+              {% set pop = item.precipitation_probability | int(0) %}
+              {% set cond = item.condition %}
+              {% if start <= dt <= end %}
+                {% set flag = ' ⚠' if (pop >= 40 or cond in ['rainy','pouring','lightning','lightning-rainy']) else '' %}
+                {% set ns.lines = ns.lines + [dt.strftime('%H:%M') ~ ' ' ~ cond ~ ' ' ~ pop ~ '%' ~ flag] %}
+              {% endif %}
+            {% endfor %}
+            {{ ns.lines | join(' | ') }}
+
+          forecast_block: >
+            {% set start = now() %}
+            {% set end = start + timedelta(minutes=95) %}
+            {% set ns = namespace(block=false) %}
+            {% for item in forecast_data['weather.pirateweather'].forecast %}
+              {% set dt = as_datetime(item.datetime).astimezone(now().tzinfo) %}
+              {% set pop = item.precipitation_probability | int(0) %}
+              {% set cond = item.condition %}
+              {% if start <= dt <= end and (pop >= 40 or cond in ['rainy','pouring','lightning','lightning-rainy']) %}
+                {% set ns.block = true %}
+              {% endif %}
+            {% endfor %}
+            {{ ns.block }}
+
+      - service: persistent_notification.create
+        data:
+          title: "GOAT Weather Check"
+          message: >
+            Soil moisture: {{ soil_moisture }}% (block={{ soil_moisture >= 55 }})
+            Mower error: {{ mower_error }} (block={{ mower_error != 0 }})
+            Forecast block: {{ forecast_block }}
+            Slots: {{ forecast_slots }}
+            Result: {% if soil_moisture >= 55 %}CANCEL — wet grass ({{ soil_moisture | round(1) }}%){% elif mower_error != 0 %}CANCEL — mower error{% elif forecast_block == 'True' %}CANCEL — forecast rain{% else %}GO{% endif %}
+
+  goat_start_mowing_now:
+    alias: GOAT - Start Mowing Now
+    mode: single
+    sequence:
+      - delay:
+          seconds: 5
+
+      - service: homeassistant.update_entity
+        target:
+          entity_id:
+            - sensor.goat_a3000_lidar_error
+            - lawn_mower.goat_a3000_lidar
+
+      - service: weather.get_forecasts
+        target:
+          entity_id: weather.pirateweather
+        data:
+          type: hourly
+        response_variable: goat_weather_forecast
+
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ states('sensor.goat_a3000_lidar_error') | int(0) == 0 }}
+              - condition: template
+                value_template: >
+                  {{ states('sensor.front_rain_sensor_soil_moisture') | float(100) < 55 }}
+              - condition: template
+                value_template: >
+                  {% set start = now() %}
+                  {% set end = start + timedelta(minutes=95) %}
+                  {% set ns = namespace(block=false) %}
+                  {% for item in goat_weather_forecast['weather.pirateweather'].forecast %}
+                    {% set dt = as_datetime(item.datetime).astimezone(now().tzinfo) %}
+                    {% set pop = item.precipitation_probability | int(0) %}
+                    {% set condition = item.condition %}
+                    {% if start <= dt <= end and (
+                      pop >= 40 or condition in ['rainy','pouring','lightning','lightning-rainy']
+                    ) %}
+                      {% set ns.block = true %}
+                    {% endif %}
+                  {% endfor %}
+                  {{ not ns.block }}
+            sequence:
+              - if:
+                  - condition: template
+                    value_template: "{{ states('input_select.goat_mow_mode').startswith('Areas') }}"
+                then:
+                  - service: shell_command.goat_write_zones
+                  - delay:
+                      milliseconds: 500
+
+              - service: input_text.set_value
+                target:
+                  entity_id: input_text.goat_last_mowing_status
+                data:
+                  value: "Normal"
+
+              - service: input_datetime.set_datetime
+                target:
+                  entity_id: input_datetime.goat_last_mowing_decision
+                data:
+                  datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+              - service: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.goat_departure_window_active
+
+              - service: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.goat_mowing_session_active
+
+              - service: input_datetime.set_datetime
+                target:
+                  entity_id: input_datetime.goat_mowing_session_started_at
+                data:
+                  datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+              - service: script.goat_open_garage
+
+              - service: lawn_mower.start_mowing
+                target:
+                  entity_id: lawn_mower.goat_a3000_lidar
+
+              - service: script.goat_notify
+                data:
+                  title: "Garage opened for mower."
+                  message: >
+                    Mower started manually.
+                    Mode: {{ states('input_select.goat_mow_mode') }}.
+                    Garage opened.
+
+        default:
+          - service: input_boolean.turn_off
+            target:
+              entity_id:
+                - input_boolean.goat_departure_window_active
+                - input_boolean.goat_mowing_session_active
+
+          - service: input_text.set_value
+            target:
+              entity_id: input_text.goat_last_mowing_status
+            data:
+              value: "Cancelled due to weather"
+
+          - service: input_datetime.set_datetime
+            target:
+              entity_id: input_datetime.goat_last_mowing_decision
+            data:
+              datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+          - service: script.goat_notify
+            data:
+              title: "Mowing cancelled"
+              message: >
+                {% if states('sensor.front_rain_sensor_soil_moisture') | float(100) >= 55 %}
+                  Mowing cancelled — grass is too wet (soil moisture {{ states('sensor.front_rain_sensor_soil_moisture') | round(1) }}%).
+                {% elif states('sensor.goat_a3000_lidar_error') | int(0) != 0 %}
+                  Mowing cancelled — mower has an active error.
+                {% else %}
+                  Mowing cancelled — rain forecast in next 95 minutes.
+                {% endif %}
+
+
+automation:
+  - alias: GOAT - Scheduled Start Gatekeeper
+    id: goat_scheduled_start_gatekeeper
+    mode: single
+
+    trigger:
+      - platform: template
+        value_template: >
+          {{
+            now().strftime('%H:%M')
+            ==
+            today_at(states('input_datetime.goat_mowing_start_time')).strftime('%H:%M')
+          }}
+
+    condition:
+      - condition: state
+        entity_id: input_boolean.goat_automation_enabled
+        state: "on"
+
+      - condition: time
+        weekday:
+          - sun
+          - tue
+          - thu
+          - sat
+
+    action:
+      - service: script.goat_mowing_start
+
+
+  - alias: GOAT - Manual Start Detected
+    id: goat_manual_start_detected
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: lawn_mower.goat_a3000_lidar
+        to: "mowing"
+    condition:
+      - condition: state
+        entity_id: input_boolean.goat_automation_enabled
+        state: "on"
+      - condition: state
+        entity_id: input_boolean.goat_mowing_session_active
+        state: "off"
+    action:
+      - service: weather.get_forecasts
+        target:
+          entity_id: weather.pirateweather
+        data:
+          type: hourly
+        response_variable: goat_weather_forecast
+
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: >
+                  {% set start = now() %}
+                  {% set end = start + timedelta(minutes=95) %}
+                  {% set ns = namespace(block=false) %}
+                  {% for item in goat_weather_forecast['weather.pirateweather'].forecast %}
+                    {% set dt = as_datetime(item.datetime).astimezone(now().tzinfo) %}
+                    {% set pop = item.precipitation_probability | int(0) %}
+                    {% set condition = item.condition %}
+                    {% if start <= dt <= end and (
+                      pop >= 40 or condition in ['rainy','pouring','lightning','lightning-rainy']
+                    ) %}
+                      {% set ns.block = true %}
+                    {% endif %}
+                  {% endfor %}
+                  {{ ns.block }}
+            sequence:
+              - service: script.goat_notify
+                data:
+                  title: "Mower stopped due to weather"
+                  message: "Mower started but rain is forecast. Sending it back to dock."
+                  critical: true
+              - service: script.goat_try_dock
+
+        default:
+          - service: input_boolean.turn_on
+            target:
+              entity_id:
+                - input_boolean.goat_departure_window_active
+                - input_boolean.goat_mowing_session_active
+
+          - service: input_datetime.set_datetime
+            target:
+              entity_id: input_datetime.goat_mowing_session_started_at
+            data:
+              datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+          - service: input_datetime.set_datetime
+            target:
+              entity_id: input_datetime.goat_last_mowing_decision
+            data:
+              datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+          - service: input_text.set_value
+            target:
+              entity_id: input_text.goat_last_mowing_status
+            data:
+              value: "Manual"
+
+          - service: script.goat_open_garage
+
+          - service: script.goat_notify
+            data:
+              title: "Manual mowing session detected"
+              message: "Mower started outside of schedule. Garage opened and automation sequence activated."
+
+          - delay: "00:01:00"
+
+          - service: script.goat_close_garage
+
+          - service: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.goat_departure_window_active
+
+
+  - alias: GOAT - Paused Too Long Return To Dock
+    id: goat_paused_too_long_return_to_dock
+    mode: single
+
+    trigger:
+      - platform: state
+        entity_id: lawn_mower.goat_a3000_lidar
+        to: "paused"
+        for:
+          minutes: 5
+
+    condition:
+      - condition: state
+        entity_id: input_boolean.goat_automation_enabled
+        state: "on"
+
+      - condition: state
+        entity_id: input_boolean.goat_mowing_session_active
+        state: "on"
+
+      - condition: not
+        conditions:
+          - condition: state
+            entity_id: lawn_mower.goat_a3000_lidar
+            state: "docked"
+
+    action:
+      - service: script.goat_notify
+        data:
+          title: "GOAT paused too long"
+          message: "GOAT has been paused for 5 minutes during an active mowing session. Sending it back to dock."
+          critical: true
+
+      - service: lawn_mower.dock
+        target:
+          entity_id: lawn_mower.goat_a3000_lidar
+
+
+  - alias: GOAT - Open Garage When Returning
+    id: goat_open_garage_when_returning
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: lawn_mower.goat_a3000_lidar
+        to: "returning"
+
+    condition:
+      - condition: state
+        entity_id: input_boolean.goat_automation_enabled
+        state: "on"
+
+      - condition: state
+        entity_id: input_boolean.goat_mowing_session_active
+        state: "on"
+
+    action:
+      - service: script.goat_open_garage
+
+      - service: input_text.set_value
+        target:
+          entity_id: input_text.goat_last_mowing_status
+        data:
+          value: "Returning"
+
+      - service: script.goat_notify
+        data:
+          title: "GOAT returning"
+          message: "GOAT is returning to dock. Garage opened."
+
+  - alias: GOAT - Close Garage When Mowing Starts
+    id: goat_close_garage_when_mowing_starts
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: lawn_mower.goat_a3000_lidar
+        to: "mowing"
+    condition:
+      - condition: state
+        entity_id: input_boolean.goat_automation_enabled
+        state: "on"
+      - condition: state
+        entity_id: input_boolean.goat_departure_window_active
+        state: "on"
+    action:
+      - delay: "00:01:00"
+      - service: script.goat_close_garage
+      - service: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.goat_departure_window_active
+      - service: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.goat_mowing_session_active
+
+  - alias: GOAT - Error After Mowing Started
+    id: goat_error_after_mowing_started
+    mode: single
+    trigger:
+      - platform: template
+        value_template: "{{ states('sensor.goat_a3000_lidar_error') | int(0) != 0 }}"
+    condition:
+      - condition: state
+        entity_id: input_boolean.goat_automation_enabled
+        state: "on"
+      - condition: state
+        entity_id: input_boolean.goat_mowing_session_active
+        state: "on"
+    action:
+      - service: script.goat_notify
+        data:
+          title: "GOAT error during mowing"
+          message: "GOAT reported an error after mowing started. Opening garage and trying return-to-dock."
+          critical: true
+
+      - service: script.goat_open_garage
+      - service: script.goat_try_dock
+
+  - alias: GOAT - Open Garage For Expected Return
+    id: goat_open_garage_for_expected_return
+    mode: single
+    trigger:
+      - platform: template
+        value_template: >
+          {% set started = states('input_datetime.goat_mowing_session_started_at') %}
+          {% if started not in ['unknown', 'unavailable', 'none'] %}
+            {{
+              now().strftime('%H:%M')
+              ==
+              (
+                as_datetime(started) + timedelta(minutes=95)
+              ).strftime('%H:%M')
+            }}
+          {% else %}
+            false
+          {% endif %}
+    condition:
+      - condition: state
+        entity_id: input_boolean.goat_automation_enabled
+        state: "on"
+
+      - condition: not
+        conditions:
+          - condition: state
+            entity_id: input_text.goat_last_mowing_status
+            state: "Cancelled due to weather"
+
+      - condition: state
+        entity_id: input_boolean.goat_mowing_session_active
+        state: "on"
+
+      - condition: time
+        weekday:
+          - sat
+          - sun
+          - tue
+          - thu
+    action:
+      - service: script.goat_notify
+        data:
+          title: "Mower expected return"
+          message: "Opening garage for expected Mower Robot return window."
+
+      - service: script.goat_open_garage
+
+  - alias: GOAT - Close Garage When Docked
+    id: goat_close_garage_when_docked
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: lawn_mower.goat_a3000_lidar
+        from:
+          - "mowing"
+          - "paused"
+          - "returning"
+        to: "docked"
+
+    condition:
+      - condition: state
+        entity_id: input_boolean.goat_automation_enabled
+        state: "on"
+      - condition: state
+        entity_id: input_boolean.goat_mowing_session_active
+        state: "on"
+      - condition: state
+        entity_id: input_boolean.goat_garage_managed_open
+        state: "on"
+    action:
+      - delay: "00:01:00"
+      - service: script.goat_close_garage
+      - service: input_boolean.turn_off
+        target:
+          entity_id:
+            - input_boolean.goat_departure_window_active
+            - input_boolean.goat_mowing_session_active
+
+      - service: script.goat_notify
+        data:
+          title: "Mower docked"
+          message: "Mower is docked. Garage close sequence completed."
+
+  - alias: GOAT - Not Docked Fallback Alert
+    id: goat_not_docked_fallback_alert
+    mode: single
+    trigger:
+      - platform: template
+        value_template: >
+          {% set started = states('input_datetime.goat_mowing_session_started_at') %}
+          {% if started not in ['unknown', 'unavailable', 'none'] %}
+            {{
+              now().strftime('%H:%M')
+              ==
+              (
+                as_datetime(started) + timedelta(minutes=120)
+              ).strftime('%H:%M')
+            }}
+          {% else %}
+            false
+          {% endif %}
+
+    condition:
+      - condition: state
+        entity_id: input_boolean.goat_automation_enabled
+        state: "on"
+      - condition: state
+        entity_id: input_boolean.goat_mowing_session_active
+        state: "on"
+      - condition: not
+        conditions:
+          - condition: state
+            entity_id: lawn_mower.goat_a3000_lidar
+            state: "docked"
+    action:
+      - service: script.goat_notify
+        data:
+          title: "Mower not docked"
+          message: "The robot mower has not reported docked status within 2 hours of scheduled mowing start. Check mower and garage."
+          critical: true
