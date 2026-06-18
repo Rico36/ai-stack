@@ -256,12 +256,27 @@ script:
                 data:
                   datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
 
+              - if:
+                  - condition: template
+                    value_template: "{{ states('input_select.goat_mow_mode').startswith('Areas') }}"
+                then:
+                  - service: shell_command.goat_write_zones
+                  - delay:
+                      milliseconds: 500
+
               - service: script.goat_open_garage
+
+              - service: lawn_mower.start_mowing
+                target:
+                  entity_id: lawn_mower.goat_a3000_lidar
 
               - service: script.goat_notify
                 data:
-                  title: "Garage opened for mower."
-                  message: "Garage just opened for scheduled mowing start."
+                  title: "Scheduled mowing started"
+                  message: >
+                    Mowing started on schedule.
+                    Mode: {{ states('input_select.goat_mow_mode') }}.
+                    Garage opened.
 
         default:
           - service: input_boolean.turn_off
