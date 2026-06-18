@@ -1,17 +1,14 @@
-# Ecovacs GOAT A3000 LiDAR - Home Assistant patches
+# Ecovacs GOAT A3000 LiDAR — Home Assistant Integration
 
-Working patches for the deebot-client library to get the GOAT A3000 LiDAR
-(model `cr0e4u`) fully working in Home Assistant: start/pause/resume/stop/dock
-from HA, correct live state (Mowing / Paused / Returning / Docked / Error),
-and working error codes.
+Full Home Assistant integration for the GOAT A3000 LiDAR mower: deebot-client
+patches to make the mower work at all, plus a complete HA automation package
+that replaces the Ecovacs app as the scheduler.
 
-Everything here was verified against real hardware with MQTT debug logs.
-No guesswork.
+---
 
-## Tested environment
+## Part 1 — deebot-client patches
 
-These patches were built and verified on exactly this setup. The closer
-yours matches, the more likely they work unmodified.
+### Tested environment
 
 | Component | Version / detail |
 |---|---|
@@ -33,10 +30,11 @@ and port the changes by hand (they are small; see "The patches" below).
 Check your version with:
 
 ```bash
-docker exec home-assistant python -c "import deebot_client; print(deebot_client.__version__)"
+docker exec home-assistant python -c \
+  "import importlib.metadata; print(importlib.metadata.version('deebot-client'))"
 ```
 
-## The problems
+### The problems
 
 Stock deebot-client treats the A3000 like a vacuum. Four things break:
 
@@ -47,59 +45,128 @@ Stock deebot-client treats the A3000 like a vacuum. Four things break:
 | "Returning" never shown | Returning signal arrives in `onChargeInfo` (`state: goCharging`), which the library drops |
 | Scheduled sessions show wrong state | Schedule-started sessions push `onScheduleTaskInfo`, unknown to the library |
 
-## The patches
+### The patches
 
 Three files, drop-in replacements for the ones inside the HA container:
 
 - **`patches/cr0e4u.py`** replaces `deebot_client/hardware/cr0e4u.py`.
   Swaps `GetCleanInfoV2` for `GetCleanInfo` (the A3000 answers this one)
-  and wires the clean action to `CleanMower`.
+  and wires the clean action to `CleanMowerArea`.
 
 - **`patches/clean.py`** replaces `deebot_client/commands/json/clean.py`.
-  Adds a `CleanMower` command class: `clean` endpoint, `{"type": "auto"}`
-  payload for all four actions. Note: `"area"` and `""` are both rejected by
-  the A3000 with `msg: "unknow type"`, and the response carries `code: 0`,
-  so it fails silently if you only check the code.
+  Adds `CleanMower` and `CleanMowerArea` command classes. `CleanMowerArea`
+  reads `/tmp/goat_zones` (comma-separated zone IDs written by HA before
+  each mow) and sends `{"type": "spotArea", "value": "..."}`. Falls back
+  to `{"type": "auto"}` when the file is absent.
 
 - **`patches/messages_json_init.py`** replaces `deebot_client/messages/json/__init__.py`.
   Two additions: routes `onScheduleTaskInfo` to the getCleanInfo handler
   (fixes scheduled-session state), and adds a guarded `onChargeInfo` handler
-  that maps `state == "goCharging"` to RETURNING. The guard matters: after
-  docking the same message fires with `state: "idle"`, and mapping that
-  overrides DOCKED with IDLE (HA shows it as "Paused").
+  that maps `state == "goCharging"` to RETURNING.
 
-## Install
+### Install
 
 ```bash
-git clone https://github.com/Rico36/Ecovacs-Goat-A3000-Mower.git
-cd Ecovacs-Goat-A3000-Mower
-./scripts/apply-patches.sh
+git clone https://github.com/Rico36/ai-stack.git
+cd ai-stack/goat-a3000
+./validate-patches.sh
 ```
 
-The script copies the three files into the `home-assistant` container,
-clears the Python bytecode caches (`__pycache__`; skip this and the old
-code keeps running), and restarts HA.
-
-Adjust the container name and the site-packages path at the top of the
-script if yours differ. The path includes the Python version
-(`python3.14` here). Check yours with:
+Adjust the container name and site-packages path at the top of the script
+if yours differ. Check your Python path with:
 
 ```bash
 docker exec home-assistant find /usr/local/lib -name "cr0e4u.py"
 ```
 
-## Surviving container updates
+### Surviving container updates
 
 Anything that recreates the container (Watchtower, image update) wipes the
-patches. `scripts/check-patches.sh` checks a sentinel and reapplies only
-when needed. It is safe to run hourly: it does nothing (no restart) when
-the patches are intact. Root crontab:
+patches. `validate-patches.sh` checks a sentinel and reapplies only when
+needed. It is safe to run hourly: it does nothing (no restart) when the
+patches are intact. Root crontab:
 
 ```
-0 * * * * /home/admin/goat-a3000/scripts/check-patches.sh >> /home/admin/patch.log 2>&1
+0 * * * * /home/admin/goat-a3000/validate-patches.sh >> /home/admin/patch.log 2>&1
 ```
 
-Adjust the path to wherever you cloned the repo.
+### Zone IDs (cr0e4u)
+
+Zone IDs are internal library IDs, not the area numbers shown in the Ecovacs
+app. Find yours by enabling debug logging for the mower in HA, starting a
+zone mow from the app, then searching the logs for:
+
+```
+onCleanInfo ... "type":"spotArea","value":"3,2,6,4,7,5"
+```
+
+Confirmed IDs on this hardware:
+
+| Zone ID | Area |
+|---|---|
+| 2 | Front Street |
+| 3 | Front |
+| 4 | Left Side Street |
+| 5 | Backyard Side |
+| 6 | Left Side |
+| 7 | Backyard |
+
+---
+
+## Part 2 — HA automation package
+
+`goat_mower_garage.yaml` is a complete HA package. Drop it in your
+`/config/packages/` folder and reload. It replaces the Ecovacs app as
+the sole scheduler — delete all Ecovacs app schedules after deploying.
+
+### What it does
+
+- **Scheduled mowing**: fires at a configurable daily time on selected days,
+  checks weather, opens the garage, and commands `lawn_mower.start_mowing`
+- **Manual mowing**: "Start Mowing Now" button on the dashboard runs the
+  same weather check and mow flow
+- **Makeup mowing**: if a scheduled mow is weather-cancelled, retries
+  automatically every hour 11am–7pm on non-scheduled days until conditions clear
+- **Garage management**: opens before mowing, closes after departure; opens
+  again when mower returns; closes when docked
+- **Weather protection**: blocks mowing if soil moisture ≥ 55% (wet grass /
+  dew / rain) or if PirateWeather forecasts ≥ 40% precipitation probability
+  in the next 95 minutes
+- **Error handling**: critical iOS alert + dock command on mower error or
+  pause > 5 minutes; fallback alert if mower is still out after 2 hours
+
+### External dependencies
+
+| Dependency | Purpose |
+|---|---|
+| PirateWeather integration | 95-minute rain forecast (`weather.pirateweather`) |
+| THIRDREALITY Soil Moisture Sensor Gen2 (Zigbee) | Wet grass detection (`sensor.front_rain_sensor_soil_moisture`) |
+| iOS Companion App | Push notifications via `notify.house_phones` |
+| `cover.garage_door` | Garage door entity (any cover integration) |
+
+### Configuration — after deploying the package
+
+1. **Set your mowing days** — tap Mon–Sun buttons on the dashboard
+2. **Set your start time** — `Scheduled Start Time` input on the dashboard
+3. **Set your mow mode** — "Areas" or "Full Map (Auto)"
+4. **Set your zone IDs** — comma-separated (see Zone IDs above)
+5. **Enable automation** — `GOAT Automation Enabled` toggle
+6. **Delete all Ecovacs app schedules** — HA is now the scheduler
+
+### Dashboard
+
+`dashboard.yaml` contains the reference card YAML. Paste it into your
+dashboard via the raw config editor. Requires two HACS frontend cards:
+
+- `custom:button-card` — day-of-week selector grid
+- `custom:template-entity-row` — session status rows
+
+Layout:
+1. Entities card — status + scheduled mowing (time, mode, zone IDs)
+2. 7-column button grid — Mon–Sun selectors (green = scheduled, grey = off)
+3. Entities card ("Mowing Run") — manual start + session status
+
+---
 
 ## Findings reference
 
@@ -107,8 +174,7 @@ For anyone debugging other GOAT models, observed on cr0e4u fw 1.13.31:
 
 - `getCleanInfo` answers; `getCleanInfo_V2` times out (errno 500).
 - `getCleanInfo` returns `idle` during scheduled sessions. The app uses
-  `getScheduleTaskInfo` as the authoritative state source, which is not
-  implemented in the library yet.
+  `getScheduleTaskInfo` as the authoritative state source.
 - HA/app-started sessions push `onCleanInfo` continuously (handled by the
   library's legacy fallback). Schedule-started sessions push
   `onScheduleTaskInfo` instead.
