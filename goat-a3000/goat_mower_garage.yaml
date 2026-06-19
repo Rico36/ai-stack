@@ -230,7 +230,11 @@ script:
                   {{ states('sensor.goat_a3000_lidar_error') | int(0) == 0 }}
               - condition: template
                 value_template: >
-                  {{ states('sensor.front_rain_sensor_soil_moisture') | float(100) < 55 }}
+                  {% set status = states('input_select.goat_grass_status') %}
+                  {% if status == 'Wet' %}false
+                  {% elif status == 'Dry' %}true
+                  {% else %}{{ states('sensor.front_rain_sensor_soil_moisture') | float(100) < 55 }}
+                  {% endif %}
               - condition: template
                 value_template: >
                   {% set start = now() %}
@@ -323,8 +327,12 @@ script:
             data:
               title: "Mowing cancelled — makeup pending"
               message: >
-                {% if states('sensor.front_rain_sensor_soil_moisture') | float(100) >= 55 %}
-                  Mowing cancelled — grass is too wet ({{ states('sensor.front_rain_sensor_soil_moisture') | round(1) }}%). Will attempt a makeup mow when conditions clear.
+                {% set status = states('input_select.goat_grass_status') %}
+                {% set moisture = states('sensor.front_rain_sensor_soil_moisture') | float(100) %}
+                {% if status == 'Wet' %}
+                  Mowing cancelled — Grass Status is Wet ({{ moisture | round(1) }}% soil moisture). Will attempt a makeup mow when conditions clear.
+                {% elif status != 'Dry' and moisture >= 55 %}
+                  Mowing cancelled — grass is too wet ({{ moisture | round(1) }}%). Will attempt a makeup mow when conditions clear.
                 {% elif states('sensor.goat_a3000_lidar_error') | int(0) != 0 %}
                   Mowing cancelled — mower has an active error. Will attempt a makeup mow when resolved.
                 {% else %}
@@ -376,15 +384,25 @@ script:
             {% endfor %}
             {{ ns.block }}
 
+      - variables:
+          grass_status: "{{ states('input_select.goat_grass_status') }}"
+          grass_gate: >
+            {% if grass_status == 'Wet' %}CANCEL — Grass Status is Wet
+            {% elif grass_status == 'Dry' %}GO (Grass Status override: Dry)
+            {% elif soil_moisture < 55 %}GO (Uncertain, moisture {{ soil_moisture | round(1) }}% < 55%)
+            {% else %}CANCEL — Uncertain + moisture {{ soil_moisture | round(1) }}% ≥ 55%
+            {% endif %}
+
       - service: persistent_notification.create
         data:
           title: "GOAT Weather Check"
           message: >
-            Soil moisture: {{ soil_moisture }}% (block={{ soil_moisture >= 55 }})
+            Grass Status: {{ grass_status }} → {{ grass_gate }}
+            Soil moisture: {{ soil_moisture }}%
             Mower error: {{ mower_error }} (block={{ mower_error != 0 }})
             Forecast block: {{ forecast_block }}
             Slots: {{ forecast_slots }}
-            Result: {% if soil_moisture >= 55 %}CANCEL — wet grass ({{ soil_moisture | round(1) }}%){% elif mower_error != 0 %}CANCEL — mower error{% elif forecast_block == 'True' %}CANCEL — forecast rain{% else %}GO{% endif %}
+            Result: {% if grass_status == 'Wet' %}CANCEL — Grass Status Wet{% elif grass_status != 'Dry' and soil_moisture >= 55 %}CANCEL — wet grass ({{ soil_moisture | round(1) }}%){% elif mower_error != 0 %}CANCEL — mower error{% elif forecast_block == 'True' %}CANCEL — forecast rain{% else %}GO{% endif %}
 
   goat_start_mowing_now:
     alias: GOAT - Start Mowing Now
@@ -413,7 +431,11 @@ script:
                   {{ states('sensor.goat_a3000_lidar_error') | int(0) == 0 }}
               - condition: template
                 value_template: >
-                  {{ states('sensor.front_rain_sensor_soil_moisture') | float(100) < 55 }}
+                  {% set status = states('input_select.goat_grass_status') %}
+                  {% if status == 'Wet' %}false
+                  {% elif status == 'Dry' %}true
+                  {% else %}{{ states('sensor.front_rain_sensor_soil_moisture') | float(100) < 55 }}
+                  {% endif %}
               - condition: template
                 value_template: >
                   {% set start = now() %}
@@ -502,8 +524,12 @@ script:
             data:
               title: "Mowing cancelled"
               message: >
-                {% if states('sensor.front_rain_sensor_soil_moisture') | float(100) >= 55 %}
-                  Mowing cancelled — grass is too wet (soil moisture {{ states('sensor.front_rain_sensor_soil_moisture') | round(1) }}%).
+                {% set status = states('input_select.goat_grass_status') %}
+                {% set moisture = states('sensor.front_rain_sensor_soil_moisture') | float(100) %}
+                {% if status == 'Wet' %}
+                  Mowing cancelled — Grass Status is Wet ({{ moisture | round(1) }}% soil moisture).
+                {% elif status != 'Dry' and moisture >= 55 %}
+                  Mowing cancelled — grass is too wet (soil moisture {{ moisture | round(1) }}%).
                 {% elif states('sensor.goat_a3000_lidar_error') | int(0) != 0 %}
                   Mowing cancelled — mower has an active error.
                 {% else %}
@@ -917,7 +943,11 @@ automation:
                   {{ states('sensor.goat_a3000_lidar_error') | int(0) == 0 }}
               - condition: template
                 value_template: >
-                  {{ states('sensor.front_rain_sensor_soil_moisture') | float(100) < 55 }}
+                  {% set status = states('input_select.goat_grass_status') %}
+                  {% if status == 'Wet' %}false
+                  {% elif status == 'Dry' %}true
+                  {% else %}{{ states('sensor.front_rain_sensor_soil_moisture') | float(100) < 55 }}
+                  {% endif %}
               - condition: template
                 value_template: >
                   {% set start = now() %}
@@ -990,8 +1020,12 @@ automation:
                 data:
                   title: "Makeup mow waiting"
                   message: >
-                    {% if states('sensor.front_rain_sensor_soil_moisture') | float(100) >= 55 %}
-                      Makeup mow pending — grass too wet ({{ states('sensor.front_rain_sensor_soil_moisture') | round(1) }}%). Will retry hourly until 7 pm.
+                    {% set status = states('input_select.goat_grass_status') %}
+                    {% set moisture = states('sensor.front_rain_sensor_soil_moisture') | float(100) %}
+                    {% if status == 'Wet' %}
+                      Makeup mow pending — Grass Status is Wet ({{ moisture | round(1) }}%). Will retry hourly until 7 pm.
+                    {% elif status != 'Dry' and moisture >= 55 %}
+                      Makeup mow pending — grass too wet ({{ moisture | round(1) }}%). Will retry hourly until 7 pm.
                     {% elif states('sensor.goat_a3000_lidar_error') | int(0) != 0 %}
                       Makeup mow pending — mower has an active error. Will retry hourly until 7 pm.
                     {% else %}
