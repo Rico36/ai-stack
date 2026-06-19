@@ -72,6 +72,11 @@ input_text:
     name: GOAT Last Mowing Status
     max: 255
 
+  goat_grass_status:
+    name: GOAT Grass Status
+    initial: "Uncertain"
+    max: 20
+
   goat_zone_ids:
     # This are my zone areas defined in the Ecovacs APP  Area Mowing page.
     # Internally the library uses zone IDs and not the actual zone area numbers shown in the Ecovac app.
@@ -988,3 +993,35 @@ automation:
                     {% else %}
                       Makeup mow pending — rain forecast. Will retry hourly until 7 pm.
                     {% endif %}
+
+  - alias: GOAT - Update Grass Status
+    id: goat_update_grass_status
+    mode: single
+    trigger:
+      - platform: state
+        entity_id:
+          - sensor.front_rain_sensor_soil_moisture
+          - sensor.soil_moisture_rate_of_change
+    action:
+      - variables:
+          m: "{{ states('sensor.front_rain_sensor_soil_moisture') | float(0) }}"
+          r: "{{ states('sensor.soil_moisture_rate_of_change') | float(0) }}"
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ m < 68 and r < -3 }}"
+            sequence:
+              - service: input_text.set_value
+                target:
+                  entity_id: input_text.goat_grass_status
+                data:
+                  value: "Dry"
+          - conditions:
+              - condition: template
+                value_template: "{{ m > 55 and r > 3 }}"
+            sequence:
+              - service: input_text.set_value
+                target:
+                  entity_id: input_text.goat_grass_status
+                data:
+                  value: "Wet"
