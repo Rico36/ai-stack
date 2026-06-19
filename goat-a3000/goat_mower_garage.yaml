@@ -50,6 +50,15 @@ input_select:
       - "Full Map (Auto)"
     icon: mdi:map
 
+  goat_grass_status:
+    name: GOAT Grass Status
+    options:
+      - Uncertain
+      - Dry
+      - Wet
+    initial: Uncertain
+    icon: mdi:grass
+
 
 input_datetime:
   goat_mowing_start_time:
@@ -71,11 +80,6 @@ input_text:
   goat_last_mowing_status:
     name: GOAT Last Mowing Status
     max: 255
-
-  goat_grass_status:
-    name: GOAT Grass Status
-    initial: "Uncertain"
-    max: 20
 
   goat_zone_ids:
     # This are my zone areas defined in the Ecovacs APP  Area Mowing page.
@@ -1009,19 +1013,28 @@ automation:
       - choose:
           - conditions:
               - condition: template
+                value_template: "{{ m < 55 }}"
+            sequence:
+              - service: input_select.select_option
+                target:
+                  entity_id: input_select.goat_grass_status
+                data:
+                  option: "Dry"
+          - conditions:
+              - condition: template
                 value_template: "{{ m < 68 and r < -3 }}"
             sequence:
-              - service: input_text.set_value
+              - service: input_select.select_option
                 target:
-                  entity_id: input_text.goat_grass_status
+                  entity_id: input_select.goat_grass_status
                 data:
-                  value: "Dry"
+                  option: "Dry"
           - conditions:
               - condition: template
                 value_template: "{{ m > 55 and r > 3 }}"
             sequence:
-              - service: input_text.set_value
+              - service: input_select.select_option
                 target:
-                  entity_id: input_text.goat_grass_status
+                  entity_id: input_select.goat_grass_status
                 data:
-                  value: "Wet"
+                  option: "Wet"

@@ -235,6 +235,19 @@
             {% endif %}
         - entity: input_boolean.goat_makeup_pending
           name: Makeup Mow Pending
+        - type: section
+          label: Grass Condition
+        - entity: input_select.goat_grass_status
+          name: Grass Status
+          icon: mdi:grass
+        - entity: sensor.soil_moisture_rate_of_change
+          name: Grass Moisture +/-
+          icon: mdi:trending-down
+        - entity: sensor.front_rain_sensor_soil_moisture
+          name: Soil Moisture
+          icon: mdi:water-percent
+        - type: section
+          label: Last Session
         - type: custom:template-entity-row
           name: Last Mowing Started
           icon: mdi:clock-start
