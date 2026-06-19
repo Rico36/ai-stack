@@ -83,6 +83,15 @@ input_text:
     initial: "3,2,6,4,7,5"
     max: 30
 
+sensor:
+  - platform: derivative
+    source: sensor.front_rain_sensor_soil_moisture
+    name: Soil Moisture Rate of Change
+    unique_id: goat_soil_moisture_rate_of_change
+    round: 2
+    unit_time: h
+    time_window: "00:30:00"
+
 shell_command:
   # Writes selected zone IDs to a temp file inside the container.
   # CleanMowerArea reads this file once when start_mowing is called.
