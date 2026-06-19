@@ -543,13 +543,8 @@ automation:
     mode: single
 
     trigger:
-      - platform: template
-        value_template: >
-          {{
-            now().strftime('%H:%M')
-            ==
-            today_at(states('input_datetime.goat_mowing_start_time')).strftime('%H:%M')
-          }}
+      - platform: time
+        at: input_datetime.goat_mowing_start_time
 
     condition:
       - condition: state
