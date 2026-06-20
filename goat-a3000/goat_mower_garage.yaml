@@ -1064,7 +1064,9 @@ automation:
                   option: "Dry"
           - conditions:
               - condition: template
-                value_template: "{{ m > 55 and r > 0.02 }}"
+                value_template: >
+                  {% set wet_threshold = 0.5 if now().hour < 10 else 2.0 %}
+                  {{ m > 55 and r > wet_threshold }}
             sequence:
               - service: input_select.select_option
                 target:
