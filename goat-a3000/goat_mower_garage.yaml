@@ -1055,7 +1055,7 @@ automation:
                   option: "Dry"
           - conditions:
               - condition: template
-                value_template: "{{ m < 68 and r < -3 }}"
+                value_template: "{{ m < 68 and r < -1.5 }}"
             sequence:
               - service: input_select.select_option
                 target:
@@ -1064,7 +1064,7 @@ automation:
                   option: "Dry"
           - conditions:
               - condition: template
-                value_template: "{{ m > 55 and r > 3 }}"
+                value_template: "{{ m > 55 and r > 0.02 }}"
             sequence:
               - service: input_select.select_option
                 target:
