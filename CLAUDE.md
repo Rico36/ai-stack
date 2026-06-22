@@ -19,6 +19,7 @@ All Ecovacs GOAT A3000 LiDAR mower work lives in `goat-a3000/`.
 - HA: Docker container `home-assistant` on Raspberry Pi
 - deebot-client: 18.3.0
 - Soil moisture sensor: `sensor.front_rain_sensor_soil_moisture` (front yard, THIRDREALITY Gen2 Zigbee)
+- Additional moisture sensors on dashboard: `sensor.lawn_front_soil_moisture`, `sensor.lawn_back_soil_moisture`
 
 ### Zone IDs (cr0e4u)
 
