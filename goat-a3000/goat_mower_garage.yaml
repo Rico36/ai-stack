@@ -101,6 +101,16 @@ sensor:
     unit_time: h
     time_window: "00:30:00"
 
+template:
+  - sensor:
+      - name: "Soil Moisture Rate Filtered"
+        unique_id: goat_soil_moisture_rate_filtered
+        unit_of_measurement: "%/h"
+        icon: mdi:water-sync
+        state: >
+          {% set r = states('sensor.soil_moisture_rate_of_change') | float(0) %}
+          {{ 0 if r | abs > 10 else r | round(2) }}
+
 shell_command:
   # Writes selected zone IDs to a temp file inside the container.
   # CleanMowerArea reads this file once when start_mowing is called.
@@ -1042,7 +1052,7 @@ automation:
     action:
       - variables:
           m: "{{ states('sensor.front_rain_sensor_soil_moisture') | float(0) }}"
-          r: "{{ states('sensor.soil_moisture_rate_of_change') | float(0) }}"
+          r: "{{ states('sensor.soil_moisture_rate_filtered') | float(0) }}"
       - choose:
           - conditions:
               - condition: template
