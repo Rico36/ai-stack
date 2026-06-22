@@ -1,267 +1,255 @@
-# GOAT Mowing Schedule — HA Dashboard Card
-#
-# Settled layout (Jun 2026):
-#   - Two cards in a vertical-stack replacing the old single GOAT entities card
-#   - Card 1: entities card — GOAT status + Scheduled Mowing (time, mode, zones)
-#   - Card 2: 7-column custom:button-card grid — day selectors (green=on, grey=off)
-#   - Card 3: entities card — Manual Mowing + Session Status
-#
-# Requires: custom:button-card (HACS) and custom:template-entity-row (HACS)
-
-# ── Card 1 ───────────────────────────────────────────────────────────────────
-# Paste as the first card in your dashboard view (replaces old GOAT entities card)
-
-- type: vertical-stack
-  cards:
-    - type: entities
-      title: GOAT Mowing Schedule
-      show_header_toggle: false
-      entities:
-        - entity: input_boolean.goat_automation_enabled
-          name: GOAT Automation Enabled
-        - entity: lawn_mower.goat_a3000_lidar
-          name: GOAT Status
-          icon: mdi:robot-mower
-        - type: section
-          label: Scheduled Mowing
-        - entity: input_datetime.goat_mowing_start_time
-          name: Scheduled Start Time
-        - entity: input_select.goat_mow_mode
-          name: Mow Mode
-        - entity: input_text.goat_zone_ids
-          name: Zone IDs (Map to Areas)
-
-    # ── Day selector — green when on, grey when off ───────────────────────────
-    - type: grid
-      columns: 7
-      square: true
-      cards:
-        - type: custom:button-card
-          entity: input_boolean.goat_schedule_mon
-          name: Mon
-          show_icon: false
-          show_state: false
-          tap_action:
-            action: toggle
-          state:
-            - value: "on"
-              styles:
-                card:
-                  - background-color: green
-                name:
-                  - color: white
-                  - font-weight: bold
-            - value: "off"
-              styles:
-                card:
-                  - background-color: var(--card-background-color)
-                name:
-                  - color: var(--primary-text-color)
-                  - font-weight: normal
-        - type: custom:button-card
-          entity: input_boolean.goat_schedule_tue
-          name: Tue
-          show_icon: false
-          show_state: false
-          tap_action:
-            action: toggle
-          state:
-            - value: "on"
-              styles:
-                card:
-                  - background-color: green
-                name:
-                  - color: white
-                  - font-weight: bold
-            - value: "off"
-              styles:
-                card:
-                  - background-color: var(--card-background-color)
-                name:
-                  - color: var(--primary-text-color)
-                  - font-weight: normal
-        - type: custom:button-card
-          entity: input_boolean.goat_schedule_wed
-          name: Wed
-          show_icon: false
-          show_state: false
-          tap_action:
-            action: toggle
-          state:
-            - value: "on"
-              styles:
-                card:
-                  - background-color: green
-                name:
-                  - color: white
-                  - font-weight: bold
-            - value: "off"
-              styles:
-                card:
-                  - background-color: var(--card-background-color)
-                name:
-                  - color: var(--primary-text-color)
-                  - font-weight: normal
-        - type: custom:button-card
-          entity: input_boolean.goat_schedule_thu
-          name: Thu
-          show_icon: false
-          show_state: false
-          tap_action:
-            action: toggle
-          state:
-            - value: "on"
-              styles:
-                card:
-                  - background-color: green
-                name:
-                  - color: white
-                  - font-weight: bold
-            - value: "off"
-              styles:
-                card:
-                  - background-color: var(--card-background-color)
-                name:
-                  - color: var(--primary-text-color)
-                  - font-weight: normal
-        - type: custom:button-card
-          entity: input_boolean.goat_schedule_fri
-          name: Fri
-          show_icon: false
-          show_state: false
-          tap_action:
-            action: toggle
-          state:
-            - value: "on"
-              styles:
-                card:
-                  - background-color: green
-                name:
-                  - color: white
-                  - font-weight: bold
-            - value: "off"
-              styles:
-                card:
-                  - background-color: var(--card-background-color)
-                name:
-                  - color: var(--primary-text-color)
-                  - font-weight: normal
-        - type: custom:button-card
-          entity: input_boolean.goat_schedule_sat
-          name: Sat
-          show_icon: false
-          show_state: false
-          tap_action:
-            action: toggle
-          state:
-            - value: "on"
-              styles:
-                card:
-                  - background-color: green
-                name:
-                  - color: white
-                  - font-weight: bold
-            - value: "off"
-              styles:
-                card:
-                  - background-color: var(--card-background-color)
-                name:
-                  - color: var(--primary-text-color)
-                  - font-weight: normal
-        - type: custom:button-card
-          entity: input_boolean.goat_schedule_sun
-          name: Sun
-          show_icon: false
-          show_state: false
-          tap_action:
-            action: toggle
-          state:
-            - value: "on"
-              styles:
-                card:
-                  - background-color: green
-                name:
-                  - color: white
-                  - font-weight: bold
-            - value: "off"
-              styles:
-                card:
-                  - background-color: var(--card-background-color)
-                name:
-                  - color: var(--primary-text-color)
-                  - font-weight: normal
-
-    - type: entities
-      title: Mowing Run
-      show_header_toggle: false
-      entities:
-        - type: section
-          label: Manual Mowing
-        - type: button
-          name: Start Mowing Now
-          icon: mdi:play-circle
-          tap_action:
-            action: call-service
-            service: script.goat_start_mowing_now
-        - type: section
-          label: Session Status
-        - type: custom:template-entity-row
-          name: Expected Return
-          icon: mdi:robot-mower
-          state: >
-            {% set start = states('input_datetime.goat_mowing_start_time') %}
-            {% if start not in ['unknown','unavailable'] %}
-              {{ (today_at(start) + timedelta(minutes=95)).strftime('%I:%M %p') }}
-            {% else %}
-              Unknown
-            {% endif %}
-        - type: custom:template-entity-row
-          name: Departure Window Active
-          icon: mdi:garage-alert
-          state: >
-            {% if is_state('input_boolean.goat_departure_window_active', 'on') %}
-              Yes
-            {% else %}
-              No
-            {% endif %}
-        - type: custom:template-entity-row
-          name: Mowing Session Active
-          icon: mdi:robot-mower
-          state: >
-            {% if is_state('input_boolean.goat_mowing_session_active', 'on') %}
-              Yes
-            {% else %}
-              No
-            {% endif %}
-        - entity: input_boolean.goat_makeup_pending
-          name: Makeup Mow Pending
-        - type: section
-          label: Grass Condition
-        - entity: input_select.goat_grass_status
-          name: Grass Status
-          icon: mdi:grass
-        - entity: sensor.soil_moisture_rate_filtered
-          name: Grass Moisture +/-
-          icon: mdi:trending-down
-        - entity: sensor.front_rain_sensor_soil_moisture
-          name: Soil Moisture
-          icon: mdi:water-percent
-        - type: section
-          label: Last Session
-        - type: custom:template-entity-row
-          name: Last Mowing Started
-          icon: mdi:clock-start
-          state: >
-            {% set dt = states('input_datetime.goat_mowing_session_started_at') %}
-            {% if dt not in ['unknown','unavailable',''] %}
-              {{ as_timestamp(dt) | timestamp_custom('%b %d, %Y %I:%M %p') }}
-            {% else %}
-              Never
-            {% endif %}
-        - type: custom:template-entity-row
-          name: Last Decision
-          icon: mdi:clock-outline
-          state: >
-            {{ as_timestamp(states('input_datetime.goat_last_mowing_decision'))
-               | timestamp_custom('%b %d %I:%M %p') }}
-            — {{ states('input_text.goat_last_mowing_status') }}
+title: Home
+views:
+  - title: Main
+    path: main
+    icon: mdi:home-lightning-bolt
+    cards:
+      - type: vertical-stack
+        cards:
+          - type: entities
+            title: GOAT Mowing Schedule
+            show_header_toggle: false
+            entities:
+              - entity: input_boolean.goat_automation_enabled
+                name: GOAT Automation Enabled
+              - entity: lawn_mower.goat_a3000_lidar
+                name: GOAT Status
+                icon: mdi:robot-mower
+              - type: section
+                label: Scheduled Mowing
+              - entity: input_datetime.goat_mowing_start_time
+                name: Scheduled Start Time
+              - entity: input_select.goat_mow_mode
+                name: Mow Mode
+              - entity: input_text.goat_zone_ids
+                name: Zone IDs (Map to Areas)
+          - type: grid
+            columns: 7
+            square: true
+            cards:
+              - type: custom:button-card
+                entity: input_boolean.goat_schedule_mon
+                name: Mon
+                show_icon: false
+                show_state: false
+                tap_action:
+                  action: toggle
+                state:
+                  - value: 'on'
+                    styles:
+                      card:
+                        - background-color: green
+                      name:
+                        - color: white
+                        - font-weight: bold
+                  - value: 'off'
+                    styles:
+                      card:
+                        - background-color: var(--card-background-color)
+                      name:
+                        - color: var(--primary-text-color)
+                        - font-weight: normal
+              - type: custom:button-card
+                entity: input_boolean.goat_schedule_tue
+                name: Tue
+                show_icon: false
+                show_state: false
+                tap_action:
+                  action: toggle
+                state:
+                  - value: 'on'
+                    styles:
+                      card:
+                        - background-color: green
+                      name:
+                        - color: white
+                        - font-weight: bold
+                  - value: 'off'
+                    styles:
+                      card:
+                        - background-color: var(--card-background-color)
+                      name:
+                        - color: var(--primary-text-color)
+                        - font-weight: normal
+              - type: custom:button-card
+                entity: input_boolean.goat_schedule_wed
+                name: Wed
+                show_icon: false
+                show_state: false
+                tap_action:
+                  action: toggle
+                state:
+                  - value: 'on'
+                    styles:
+                      card:
+                        - background-color: green
+                      name:
+                        - color: white
+                        - font-weight: bold
+                  - value: 'off'
+                    styles:
+                      card:
+                        - background-color: var(--card-background-color)
+                      name:
+                        - color: var(--primary-text-color)
+                        - font-weight: normal
+              - type: custom:button-card
+                entity: input_boolean.goat_schedule_thu
+                name: Thu
+                show_icon: false
+                show_state: false
+                tap_action:
+                  action: toggle
+                state:
+                  - value: 'on'
+                    styles:
+                      card:
+                        - background-color: green
+                      name:
+                        - color: white
+                        - font-weight: bold
+                  - value: 'off'
+                    styles:
+                      card:
+                        - background-color: var(--card-background-color)
+                      name:
+                        - color: var(--primary-text-color)
+                        - font-weight: normal
+              - type: custom:button-card
+                entity: input_boolean.goat_schedule_fri
+                name: Fri
+                show_icon: false
+                show_state: false
+                tap_action:
+                  action: toggle
+                state:
+                  - value: 'on'
+                    styles:
+                      card:
+                        - background-color: green
+                      name:
+                        - color: white
+                        - font-weight: bold
+                  - value: 'off'
+                    styles:
+                      card:
+                        - background-color: var(--card-background-color)
+                      name:
+                        - color: var(--primary-text-color)
+                        - font-weight: normal
+              - type: custom:button-card
+                entity: input_boolean.goat_schedule_sat
+                name: Sat
+                show_icon: false
+                show_state: false
+                tap_action:
+                  action: toggle
+                state:
+                  - value: 'on'
+                    styles:
+                      card:
+                        - background-color: green
+                      name:
+                        - color: white
+                        - font-weight: bold
+                  - value: 'off'
+                    styles:
+                      card:
+                        - background-color: var(--card-background-color)
+                      name:
+                        - color: var(--primary-text-color)
+                        - font-weight: normal
+              - type: custom:button-card
+                entity: input_boolean.goat_schedule_sun
+                name: Sun
+                show_icon: false
+                show_state: false
+                tap_action:
+                  action: toggle
+                state:
+                  - value: 'on'
+                    styles:
+                      card:
+                        - background-color: green
+                      name:
+                        - color: white
+                        - font-weight: bold
+                  - value: 'off'
+                    styles:
+                      card:
+                        - background-color: var(--card-background-color)
+                      name:
+                        - color: var(--primary-text-color)
+                        - font-weight: normal
+          - type: entities
+            title: Manual Run / Mowing Status
+            show_header_toggle: false
+            entities:
+              - type: section
+                label: Manual Mowing
+              - type: button
+                name: Start Mowing Now
+                icon: mdi:play-circle
+                tap_action:
+                  action: call-service
+                  service: script.goat_start_mowing_now
+              - type: section
+                label: Grass Condition
+              - entity: input_select.goat_grass_status
+                name: Grass Status
+                icon: mdi:grass
+              - entity: sensor.soil_moisture_rate_filtered
+                name: Grass Moisture +/-
+                icon: mdi:trending-down
+              - entity: sensor.front_rain_sensor_soil_moisture
+                name: Soil Moisture
+                icon: mdi:water-percent
+              - entity: sensor.lawn_front_soil_moisture
+                name: Front Soil Moisture
+              - entity: sensor.lawn_back_soil_moisture
+                name: Back Soil Moisture
+              - type: section
+                label: Session Status
+              - type: custom:template-entity-row
+                name: Departure Window Active
+                icon: mdi:garage-alert
+                state: >
+                  {% if is_state('input_boolean.goat_departure_window_active',
+                  'on') %}
+                    Yes
+                  {% else %}
+                    No
+                  {% endif %}
+              - type: custom:template-entity-row
+                name: Mowing Session Active
+                icon: mdi:robot-mower
+                state: >
+                  {% if is_state('input_boolean.goat_mowing_session_active',
+                  'on') %}
+                    Yes
+                  {% else %}
+                    No
+                  {% endif %}
+              - entity: input_boolean.goat_makeup_pending
+                name: Makeup Mow Pending
+              - type: section
+                label: Last Session
+              - type: custom:template-entity-row
+                name: Last Mowing Started
+                icon: mdi:clock-start
+                state: >
+                  {% set dt =
+                  states('input_datetime.goat_mowing_session_started_at') %} {%
+                  if dt not in ['unknown','unavailable',''] %}
+                    {{ as_timestamp(dt) | timestamp_custom('%b %d, %Y %I:%M %p') }}
+                  {% else %}
+                    Never
+                  {% endif %}
+              - type: custom:template-entity-row
+                name: Last Decision
+                icon: mdi:clock-outline
+                state: >
+                  {{
+                  as_timestamp(states('input_datetime.goat_last_mowing_decision'))
+                     | timestamp_custom('%b %d %I:%M %p') }}
+                  — {{ states('input_text.goat_last_mowing_status') }}
