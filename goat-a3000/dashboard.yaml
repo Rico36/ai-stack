@@ -198,9 +198,6 @@ views:
               - entity: input_select.goat_grass_status
                 name: Grass Status
                 icon: mdi:grass
-              - entity: sensor.soil_moisture_rate_filtered
-                name: Grass Moisture +/-
-                icon: mdi:trending-down
               - entity: sensor.front_rain_sensor_soil_moisture
                 name: Soil Moisture
                 icon: mdi:water-percent

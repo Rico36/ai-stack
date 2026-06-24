@@ -92,25 +92,6 @@ input_text:
     initial: "3,2,6,4,7,5"
     max: 30
 
-sensor:
-  - platform: derivative
-    source: sensor.front_rain_sensor_soil_moisture
-    name: Soil Moisture Rate of Change
-    unique_id: goat_soil_moisture_rate_of_change
-    round: 2
-    unit_time: h
-    time_window: "00:30:00"
-
-template:
-  - sensor:
-      - name: "Soil Moisture Rate Filtered"
-        unique_id: goat_soil_moisture_rate_filtered
-        unit_of_measurement: "%/h"
-        icon: mdi:water-sync
-        state: >
-          {% set r = states('sensor.soil_moisture_rate_of_change') | float(0) %}
-          {{ 0 if r | abs > 10 else r | round(2) }}
-
 shell_command:
   # Writes selected zone IDs to a temp file inside the container.
   # CleanMowerArea reads this file once when start_mowing is called.
@@ -1046,35 +1027,22 @@ automation:
     mode: single
     trigger:
       - platform: state
-        entity_id:
-          - sensor.front_rain_sensor_soil_moisture
-          - sensor.soil_moisture_rate_of_change
+        entity_id: sensor.front_rain_sensor_soil_moisture
     action:
+      # ── Grass Status thresholds (edit here only) ──────────────────────────
+      # Morning window (4–10 AM): lower wet threshold catches dew before soil
+      # warms and dries. Daytime: tighter band avoids thermal drift.
+      # Hold (no update) when moisture is in the 68–69 % hysteresis band.
       - variables:
           m: "{{ states('sensor.front_rain_sensor_soil_moisture') | float(0) }}"
-          r: "{{ states('sensor.soil_moisture_rate_filtered') | float(0) }}"
+          morning: "{{ now().hour >= 4 and now().hour < 10 }}"
+          is_wet: "{{ (morning and m > 65) or m > 69 }}"
+          is_dry: "{{ m < 68 }}"
+      # ─────────────────────────────────────────────────────────────────────
       - choose:
           - conditions:
               - condition: template
-                value_template: "{{ m < 55 }}"
-            sequence:
-              - service: input_select.select_option
-                target:
-                  entity_id: input_select.goat_grass_status
-                data:
-                  option: "Dry"
-          - conditions:
-              - condition: template
-                value_template: "{{ m < 69 and r < -1.5 }}"
-            sequence:
-              - service: input_select.select_option
-                target:
-                  entity_id: input_select.goat_grass_status
-                data:
-                  option: "Dry"
-          - conditions:
-              - condition: template
-                value_template: "{{ m >= 70 }}"
+                value_template: "{{ is_wet }}"
             sequence:
               - service: input_select.select_option
                 target:
@@ -1083,12 +1051,10 @@ automation:
                   option: "Wet"
           - conditions:
               - condition: template
-                value_template: >
-                  {% set wet_threshold = 0.5 if now().hour < 10 else 2.0 %}
-                  {{ m > 55 and r > wet_threshold }}
+                value_template: "{{ is_dry }}"
             sequence:
               - service: input_select.select_option
                 target:
                   entity_id: input_select.goat_grass_status
                 data:
-                  option: "Wet"
+                  option: "Dry"
