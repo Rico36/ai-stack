@@ -560,6 +560,10 @@ automation:
           ] %}
           {{ days[day] == 'on' }}
 
+      - condition: state
+        entity_id: input_boolean.goat_mowing_session_active
+        state: "off"
+
     action:
       - service: script.goat_mowing_start
 
