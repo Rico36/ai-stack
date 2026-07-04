@@ -119,7 +119,7 @@ sensor:
     name: "Soil Moisture 30min Min"
     unique_id: goat_soil_moisture_30min_min
     entity_id: sensor.front_rain_sensor_soil_moisture
-    state_characteristic: minimum
+    state_characteristic: value_min
     max_age:
       minutes: 30
 
