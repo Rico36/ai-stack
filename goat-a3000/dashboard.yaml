@@ -181,18 +181,50 @@ views:
                       name:
                         - color: var(--primary-text-color)
                         - font-weight: normal
+          - type: custom:button-card
+            entity: input_boolean.goat_mowing_session_active
+            show_state: false
+            show_icon: true
+            tap_action:
+              action: call-service
+              service: script.goat_start_mowing_now
+            name: >
+              [[[
+                if (entity.state === 'on') return 'Mowing Active';
+                if (states['input_boolean.goat_departure_window_active'] &&
+                    states['input_boolean.goat_departure_window_active'].state === 'on')
+                  return 'Starting…';
+                return 'Start Mowing Now';
+              ]]]
+            icon: >
+              [[[
+                if (entity.state === 'on') return 'mdi:robot-mower';
+                return 'mdi:play-circle';
+              ]]]
+            state:
+              - value: "on"
+                styles:
+                  card:
+                    - background-color: green
+                  name:
+                    - color: white
+                    - font-weight: bold
+                  icon:
+                    - color: white
+              - value: "off"
+                styles:
+                  card:
+                    - background-color: var(--card-background-color)
+                  name:
+                    - color: var(--primary-text-color)
+                    - font-weight: normal
+                  icon:
+                    - color: var(--primary-text-color)
+
           - type: entities
-            title: Manual Run / Mowing Status
+            title: Mowing Status
             show_header_toggle: false
             entities:
-              - type: section
-                label: Manual Mowing
-              - type: button
-                name: Start Mowing Now
-                icon: mdi:play-circle
-                tap_action:
-                  action: call-service
-                  service: script.goat_start_mowing_now
               - type: section
                 label: Grass Condition
               - entity: input_select.goat_grass_status
