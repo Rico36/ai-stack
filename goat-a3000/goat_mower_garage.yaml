@@ -1210,11 +1210,6 @@ automation:
                   entity_id: input_select.goat_grass_status
                 data:
                   option: "Dry"
-              - service: input_number.set_value
-                target:
-                  entity_id: input_number.goat_moisture_baseline
-                data:
-                  value: "{{ m }}"
 
   - alias: GOAT - Lock Grass Status On Manual Override
     id: goat_lock_grass_status_override
