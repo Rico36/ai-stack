@@ -212,8 +212,6 @@ views:
               - entity: sensor.front_rain_sensor_soil_moisture
                 name: Soil Moisture
                 icon: mdi:water-percent
-              - entity: sensor.lawn_front_soil_moisture
-                name: Front Soil Moisture
               - entity: sensor.lawn_back_soil_moisture
                 name: Back Soil Moisture
               - type: section
