@@ -41,6 +41,14 @@ input_boolean:
     name: GOAT Makeup Mow Pending
     icon: mdi:calendar-refresh
 
+  goat_grass_status_override:
+    name: GOAT Grass Status Override
+    icon: mdi:hand-back-right
+
+  goat_delta_rule_active:
+    name: GOAT Delta Rule Active
+    icon: mdi:delta
+
 
 input_select:
   goat_mow_mode:
@@ -76,6 +84,20 @@ input_datetime:
     has_date: true
     has_time: true
 
+  goat_override_started_at:
+    name: GOAT Override Started At
+    has_date: true
+    has_time: true
+
+input_number:
+  goat_moisture_baseline:
+    name: GOAT Moisture Baseline
+    min: 0
+    max: 100
+    step: 0.01
+    unit_of_measurement: "%"
+    icon: mdi:water-percent
+
 input_text:
   goat_last_mowing_status:
     name: GOAT Last Mowing Status
@@ -91,6 +113,15 @@ input_text:
     name: GOAT Zone IDs
     initial: "3,2,6,4,7,5"
     max: 30
+
+sensor:
+  - platform: statistics
+    name: "Soil Moisture 30min Min"
+    unique_id: goat_soil_moisture_30min_min
+    entity_id: sensor.front_rain_sensor_soil_moisture
+    state_characteristic: minimum
+    max_age:
+      minutes: 30
 
 shell_command:
   # Writes selected zone IDs to a temp file inside the container.
@@ -1033,32 +1064,196 @@ automation:
       - platform: state
         entity_id: sensor.front_rain_sensor_soil_moisture
     action:
-      # ── Grass Status thresholds (edit here only) ──────────────────────────
-      # Morning window (4–10 AM): lower wet threshold catches dew before soil
-      # warms and dries. Daytime: tighter band avoids thermal drift.
-      # Hold (no update) when moisture is in the 68–69 % hysteresis band.
+      # ── Grass Status thresholds — edit here only ──────────────────────────
+      # Wet triggers (only these three):
+      #   Morning dew : 4–10 AM AND m > 65
+      #   Delta spike : m rose ≥ 15 % in 30 min AND status was Dry → delta_active on
+      #   High moisture: m > 69
+      # Dry triggers:
+      #   Delta cancel: delta_active AND m < baseline + 0.5 → Dry, clear delta
+      #   Normal dry  : m < 69, no delta, no override
+      #   Floor dry   : m < 55 AND not morning → always Dry, clears all flags
+      # Manual override blocks morning-dew and high-moisture Wet rules.
+      # Delta spike is the only rule that can override a manual override.
+      # Manual override auto-expires after 5 hours.
+      # ─────────────────────────────────────────────────────────────────────
       - variables:
           m: "{{ states('sensor.front_rain_sensor_soil_moisture') | float(0) }}"
           morning: "{{ now().hour >= 4 and now().hour < 10 }}"
-          is_wet: "{{ (morning and m > 65) or m > 69 }}"
-          is_dry: "{{ m < 68 }}"
-      # ─────────────────────────────────────────────────────────────────────
+          min_30: "{{ states('sensor.soil_moisture_30min_min') | float(m) }}"
+          baseline: "{{ states('input_number.goat_moisture_baseline') | float(0) }}"
+          delta_active: "{{ is_state('input_boolean.goat_delta_rule_active', 'on') }}"
+          override: "{{ is_state('input_boolean.goat_grass_status_override', 'on') }}"
+          override_age: >
+            {% set t = states('input_datetime.goat_override_started_at') %}
+            {{ (as_timestamp(now()) - as_timestamp(t)) | int(0) if t not in ['unknown','unavailable',''] else 0 }}
+          expired: "{{ is_state('input_boolean.goat_grass_status_override', 'on') and override_age > 18000 }}"
+          spike: "{{ states('input_select.goat_grass_status') == 'Dry' and (m - min_30) > 15 }}"
+          cancel: "{{ delta_active and m < baseline + 0.5 }}"
+          floor_dry: "{{ m < 55 and not morning }}"
+
+      # Clear expired override so rules below treat it as off
+      - if:
+          - condition: template
+            value_template: "{{ expired }}"
+        then:
+          - service: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.goat_grass_status_override
+
       - choose:
+          # P1: Floor dry — always overrides everything
           - conditions:
               - condition: template
-                value_template: "{{ is_wet }}"
-            sequence:
-              - service: input_select.select_option
-                target:
-                  entity_id: input_select.goat_grass_status
-                data:
-                  option: "Wet"
-          - conditions:
-              - condition: template
-                value_template: "{{ is_dry }}"
+                value_template: "{{ floor_dry }}"
             sequence:
               - service: input_select.select_option
                 target:
                   entity_id: input_select.goat_grass_status
                 data:
                   option: "Dry"
+              - service: input_boolean.turn_off
+                target:
+                  entity_id:
+                    - input_boolean.goat_delta_rule_active
+                    - input_boolean.goat_grass_status_override
+              - service: input_number.set_value
+                target:
+                  entity_id: input_number.goat_moisture_baseline
+                data:
+                  value: "{{ m }}"
+
+          # P2: Delta spike from Dry — only rule that overrides manual override
+          - conditions:
+              - condition: template
+                value_template: "{{ spike }}"
+            sequence:
+              - service: input_select.select_option
+                target:
+                  entity_id: input_select.goat_grass_status
+                data:
+                  option: "Wet"
+              - service: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.goat_delta_rule_active
+              - service: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.goat_grass_status_override
+              - service: input_number.set_value
+                target:
+                  entity_id: input_number.goat_moisture_baseline
+                data:
+                  value: "{{ min_30 }}"
+
+          # P3: Manual override active — hold
+          - conditions:
+              - condition: template
+                value_template: "{{ override and not expired }}"
+            sequence:
+              - stop: "Manual override active — holding status"
+
+          # P4: Delta cancellation — moisture returned to baseline
+          - conditions:
+              - condition: template
+                value_template: "{{ cancel }}"
+            sequence:
+              - service: input_select.select_option
+                target:
+                  entity_id: input_select.goat_grass_status
+                data:
+                  option: "Dry"
+              - service: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.goat_delta_rule_active
+              - service: input_number.set_value
+                target:
+                  entity_id: input_number.goat_moisture_baseline
+                data:
+                  value: "{{ m }}"
+
+          # P5: Delta active but not yet cancelled — hold Wet
+          - conditions:
+              - condition: template
+                value_template: "{{ delta_active }}"
+            sequence:
+              - stop: "Delta rule active — awaiting baseline return"
+
+          # P6: Morning dew
+          - conditions:
+              - condition: template
+                value_template: "{{ morning and m > 65 }}"
+            sequence:
+              - service: input_select.select_option
+                target:
+                  entity_id: input_select.goat_grass_status
+                data:
+                  option: "Wet"
+
+          # P7: High moisture
+          - conditions:
+              - condition: template
+                value_template: "{{ m > 69 }}"
+            sequence:
+              - service: input_select.select_option
+                target:
+                  entity_id: input_select.goat_grass_status
+                data:
+                  option: "Wet"
+
+          # P8: Normal dry
+          - conditions:
+              - condition: template
+                value_template: "{{ m < 69 }}"
+            sequence:
+              - service: input_select.select_option
+                target:
+                  entity_id: input_select.goat_grass_status
+                data:
+                  option: "Dry"
+              - service: input_number.set_value
+                target:
+                  entity_id: input_number.goat_moisture_baseline
+                data:
+                  value: "{{ m }}"
+
+  - alias: GOAT - Lock Grass Status On Manual Override
+    id: goat_lock_grass_status_override
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: input_select.goat_grass_status
+    condition:
+      - condition: template
+        value_template: "{{ trigger.to_state.context.user_id is not none }}"
+    action:
+      - service: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.goat_grass_status_override
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.goat_override_started_at
+        data:
+          datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+      - service: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.goat_delta_rule_active
+
+  - alias: GOAT - Expire Manual Override
+    id: goat_expire_manual_override
+    mode: single
+    trigger:
+      - platform: time_pattern
+        minutes: "/30"
+    condition:
+      - condition: state
+        entity_id: input_boolean.goat_grass_status_override
+        state: "on"
+      - condition: template
+        value_template: >
+          {% set t = states('input_datetime.goat_override_started_at') %}
+          {{ t not in ['unknown','unavailable',''] and
+             (as_timestamp(now()) - as_timestamp(t)) > 18000 }}
+    action:
+      - service: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.goat_grass_status_override

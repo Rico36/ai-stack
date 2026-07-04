@@ -198,6 +198,12 @@ views:
               - entity: input_select.goat_grass_status
                 name: Grass Status
                 icon: mdi:grass
+              - entity: input_boolean.goat_grass_status_override
+                name: Status Override
+                icon: mdi:hand-back-right
+              - entity: input_boolean.goat_delta_rule_active
+                name: Delta Rule Active
+                icon: mdi:delta
               - entity: sensor.front_rain_sensor_soil_moisture
                 name: Soil Moisture
                 icon: mdi:water-percent
