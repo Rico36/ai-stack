@@ -198,12 +198,17 @@ views:
               - entity: input_select.goat_grass_status
                 name: Grass Status
                 icon: mdi:grass
-              - entity: input_boolean.goat_grass_status_override
-                name: Status Override
-                icon: mdi:hand-back-right
-              - entity: input_boolean.goat_delta_rule_active
-                name: Delta Rule Active
-                icon: mdi:delta
+              - type: custom:template-entity-row
+                name: Active Flags
+                icon: mdi:flag-outline
+                state: >
+                  {% set o = is_state('input_boolean.goat_grass_status_override', 'on') %}
+                  {% set d = is_state('input_boolean.goat_delta_rule_active', 'on') %}
+                  {% if o and d %}Override + Delta
+                  {% elif o %}Override
+                  {% elif d %}Delta
+                  {% else %}—
+                  {% endif %}
               - entity: sensor.front_rain_sensor_soil_moisture
                 name: Soil Moisture
                 icon: mdi:water-percent
