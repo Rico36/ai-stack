@@ -1252,3 +1252,88 @@ automation:
       - service: input_boolean.turn_off
         target:
           entity_id: input_boolean.goat_grass_status_override
+
+  - alias: GOAT - Mower Garage Reminder
+    id: goat_mower_garage_reminder
+    description: >
+      Fires 17 minutes before the scheduled mow start on days enabled in the
+      dashboard. Announces on Alexas if weather is clear, notifies phones if
+      mowing will be skipped.
+    mode: single
+    trigger:
+      - platform: template
+        value_template: >
+          {{
+            now().strftime('%H:%M')
+            ==
+            (
+              today_at(states('input_datetime.goat_mowing_start_time'))
+              - timedelta(minutes=17)
+            ).strftime('%H:%M')
+          }}
+    condition:
+      - condition: state
+        entity_id: input_boolean.goat_automation_enabled
+        state: "on"
+      - condition: template
+        value_template: >
+          {% set day_map = {
+            'Monday':    'input_boolean.goat_schedule_mon',
+            'Tuesday':   'input_boolean.goat_schedule_tue',
+            'Wednesday': 'input_boolean.goat_schedule_wed',
+            'Thursday':  'input_boolean.goat_schedule_thu',
+            'Friday':    'input_boolean.goat_schedule_fri',
+            'Saturday':  'input_boolean.goat_schedule_sat',
+            'Sunday':    'input_boolean.goat_schedule_sun'
+          } %}
+          {{ is_state(day_map[now().strftime('%A')], 'on') }}
+    action:
+      - action: weather.get_forecasts
+        target:
+          entity_id: weather.pirateweather
+        data:
+          type: hourly
+        response_variable: goat_weather_forecast
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: >
+                  {% set rain_history = states('sensor.goat_rain_last_3_hours') | float(0) > 0 %}
+                  {% set mower_error = states('sensor.goat_a3000_lidar_error') | int(0) != 0 %}
+                  {% set start = today_at(states('input_datetime.goat_mowing_start_time')) %}
+                  {% set end = start + timedelta(minutes=95) %}
+                  {% set ns = namespace(block=false) %}
+                  {% for item in goat_weather_forecast['weather.pirateweather'].forecast %}
+                    {% set dt = as_datetime(item.datetime).astimezone(now().tzinfo) %}
+                    {% set pop = item.precipitation_probability | int(0) %}
+                    {% set condition = item.condition %}
+                    {% if start <= dt <= end and (
+                      pop >= 40 or condition in ['rainy','pouring','lightning','lightning-rainy']
+                    ) %}
+                      {% set ns.block = true %}
+                    {% endif %}
+                  {% endfor %}
+                  {{ rain_history or mower_error or ns.block }}
+            sequence:
+              - action: notify.house_phones
+                data:
+                  title: Robot Mower Kept Inside
+                  message: >
+                    {% if states('sensor.goat_rain_last_3_hours') | float(0) > 0 %}
+                      Mowing cancelled — grass is wet (rain detected in past 3 hours).
+                    {% elif states('sensor.goat_a3000_lidar_error') | int(0) != 0 %}
+                      Mowing cancelled — mower has an active error.
+                    {% else %}
+                      Mowing cancelled — rain forecast in next 95 minutes.
+                    {% endif %}
+        default:
+          - action: notify.house_alexas
+            data:
+              message: >
+                <audio src="soundbank://soundlibrary/home/amzn_sfx_doorbell_chime_01"/>
+                <break time="300ms"/>
+                <prosody volume="loud" rate="85%">
+                  Attention. Today is mowing day. Set up the robot mower in the
+                  garage. Make sure the sensor cover is off. Also, open the
+                  backyard gate.
+                </prosody>
