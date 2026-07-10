@@ -1298,6 +1298,7 @@ automation:
           - conditions:
               - condition: template
                 value_template: >
+                  {% set grass_wet = is_state('input_select.goat_grass_status', 'Wet') %}
                   {% set rain_history = states('sensor.goat_rain_last_3_hours') | float(0) > 0 %}
                   {% set mower_error = states('sensor.goat_a3000_lidar_error') | int(0) != 0 %}
                   {% set start = today_at(states('input_datetime.goat_mowing_start_time')) %}
@@ -1313,13 +1314,15 @@ automation:
                       {% set ns.block = true %}
                     {% endif %}
                   {% endfor %}
-                  {{ rain_history or mower_error or ns.block }}
+                  {{ grass_wet or rain_history or mower_error or ns.block }}
             sequence:
               - action: notify.house_phones
                 data:
                   title: Robot Mower Kept Inside
                   message: >
-                    {% if states('sensor.goat_rain_last_3_hours') | float(0) > 0 %}
+                    {% if is_state('input_select.goat_grass_status', 'Wet') %}
+                      Mowing cancelled — grass status is Wet.
+                    {% elif states('sensor.goat_rain_last_3_hours') | float(0) > 0 %}
                       Mowing cancelled — grass is wet (rain detected in past 3 hours).
                     {% elif states('sensor.goat_a3000_lidar_error') | int(0) != 0 %}
                       Mowing cancelled — mower has an active error.
@@ -1383,6 +1386,7 @@ automation:
           - conditions:
               - condition: template
                 value_template: >
+                  {% set grass_wet = is_state('input_select.goat_grass_status', 'Wet') %}
                   {% set rain_history = states('sensor.goat_rain_last_3_hours') | float(0) > 0 %}
                   {% set mower_error = states('sensor.goat_a3000_lidar_error') | int(0) != 0 %}
                   {% set start = today_at(states('input_datetime.goat_mowing_start_time')) %}
@@ -1398,13 +1402,15 @@ automation:
                       {% set ns.block = true %}
                     {% endif %}
                   {% endfor %}
-                  {{ rain_history or mower_error or ns.block }}
+                  {{ grass_wet or rain_history or mower_error or ns.block }}
             sequence:
               - action: notify.house_phones
                 data:
                   title: GOAT Kept Inside
                   message: >
-                    {% if states('sensor.goat_rain_last_3_hours') | float(0) > 0 %}
+                    {% if is_state('input_select.goat_grass_status', 'Wet') %}
+                      Mowing cancelled — grass status is Wet. Garage will remain closed.
+                    {% elif states('sensor.goat_rain_last_3_hours') | float(0) > 0 %}
                       Mowing cancelled — grass is wet (rain detected in past 3 hours). Garage will remain closed.
                     {% elif states('sensor.goat_a3000_lidar_error') | int(0) != 0 %}
                       Mowing cancelled — mower has an active error. Garage will remain closed.
