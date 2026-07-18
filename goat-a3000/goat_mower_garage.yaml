@@ -98,6 +98,16 @@ input_number:
     unit_of_measurement: "%"
     icon: mdi:water-percent
 
+  goat_last_dry_m:
+    name: GOAT Last Dry Moisture
+    min: 0
+    max: 100
+    step: 0.1
+    unit_of_measurement: "%"
+    icon: mdi:water-percent
+    # 0 = unset; falls back to fixed threshold (m < 69).
+    # Set only by manual Dry override; reset at 4am and on manual Wet override.
+
 input_text:
   goat_last_mowing_status:
     name: GOAT Last Mowing Status
@@ -1071,8 +1081,9 @@ automation:
       #   High moisture: m > 79
       # Dry triggers:
       #   Delta cancel: delta_active AND m < baseline + 0.5 → Dry, clear delta
-      #   Normal dry  : m < 79, no delta, no override
+      #   Normal dry  : m ≤ dry_thresh (last_dry_m if set, else 69), no delta, no override
       #   Floor dry   : m < 55 AND not morning → always Dry, clears all flags
+      # last_dry_m: set by manual Dry override; reset at 4am and on manual Wet override.
       # Manual override blocks morning-dew and high-moisture Wet rules.
       # Delta spike is the only rule that can override a manual override.
       # Manual override auto-expires after 5 hours.
@@ -1089,7 +1100,10 @@ automation:
             {{ (as_timestamp(now()) - as_timestamp(t)) | int(0) if t not in ['unknown','unavailable',''] else 0 }}
           expired: "{{ is_state('input_boolean.goat_grass_status_override', 'on') and override_age > 18000 }}"
           spike: "{{ states('input_select.goat_grass_status') == 'Dry' and (m - min_30) > 6 }}"
-          cancel: "{{ delta_active and m < baseline + 0.5 }}"
+          dry_thresh: >
+            {% set saved = states('input_number.goat_last_dry_m') | float(0) %}
+            {{ saved if saved > 0 else 69 }}
+          cancel: "{{ delta_active and m <= dry_thresh }}"
           floor_dry: "{{ m < 55 and not morning }}"
 
       # Clear expired override so rules below treat it as off
@@ -1200,10 +1214,10 @@ automation:
                 data:
                   option: "Wet"
 
-          # P8: Normal dry
+          # P8: Normal dry — uses last_dry_m if set, else fixed threshold 69
           - conditions:
               - condition: template
-                value_template: "{{ m < 69 }}"
+                value_template: "{{ m <= dry_thresh }}"
             sequence:
               - service: input_select.select_option
                 target:
@@ -1232,6 +1246,26 @@ automation:
       - service: input_boolean.turn_off
         target:
           entity_id: input_boolean.goat_delta_rule_active
+      # Set last_dry_m when user manually sets Dry; reset on manual Wet
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ trigger.to_state.state == 'Dry' }}"
+            sequence:
+              - service: input_number.set_value
+                target:
+                  entity_id: input_number.goat_last_dry_m
+                data:
+                  value: "{{ states('sensor.front_rain_sensor_soil_moisture') | float(0) }}"
+          - conditions:
+              - condition: template
+                value_template: "{{ trigger.to_state.state == 'Wet' }}"
+            sequence:
+              - service: input_number.set_value
+                target:
+                  entity_id: input_number.goat_last_dry_m
+                data:
+                  value: 0
 
   - alias: GOAT - Expire Manual Override
     id: goat_expire_manual_override
@@ -1434,3 +1468,20 @@ automation:
                   The garage door will open automatically for the mower but please
                   make sure the black sensor cover is off. Also, open the backyard gate.
                 </prosody>
+
+  - alias: GOAT - Reset Dry Threshold At Morning
+    id: goat_reset_dry_threshold_morning
+    description: >
+      Resets last_dry_m to 0 at 4am each day so morning dew rules operate
+      against the fixed threshold. A new manual Dry override can re-establish
+      a calibrated threshold later in the day.
+    mode: single
+    trigger:
+      - platform: time
+        at: "04:00:00"
+    action:
+      - service: input_number.set_value
+        target:
+          entity_id: input_number.goat_last_dry_m
+        data:
+          value: 0
