@@ -59,6 +59,20 @@ check "messages/json __init__.pyc newer than source" \
      [ -z \"\$pyc\" ] || [ \"\$pyc\" -nt \"\$src\" ]'"
 
 echo ""
+echo "authentication.py:"
+# Ecovacs API rejects appVersion 1.6.3 with error 1013 ("Please update").
+# Replace with the version string Ecovacs currently accepts.
+# Find the correct value at: https://github.com/DeebotUniverse/client.py/issues (search "1013")
+APP_VERSION="1.6.3"  # <-- UPDATE THIS when Ecovacs bumps their minimum
+check "appVersion is $APP_VERSION" \
+  "docker exec $CONTAINER grep -q '\"appVersion\": \"$APP_VERSION\"' $SITE/authentication.py"
+if ! docker exec $CONTAINER grep -q "\"appVersion\": \"$APP_VERSION\"" $SITE/authentication.py 2>/dev/null; then
+  echo "         Patching appVersion to $APP_VERSION ..."
+  docker exec $CONTAINER sed -i \
+    "s/\"appVersion\": \"[^\"]*\"/\"appVersion\": \"$APP_VERSION\"/" \
+    $SITE/authentication.py
+fi
+
 echo "deebot-client version:"
 GOT=$(docker exec $CONTAINER python -c "import importlib.metadata; print(importlib.metadata.version('deebot-client'))" 2>/dev/null)
 if [ "$GOT" = "18.3.0" ]; then
