@@ -30,7 +30,7 @@ yours matches, the more likely they work unmodified.
 Not tested on: HA OS or HA Supervised (no direct `docker exec` access to
 the HA container there), other GOAT models, other firmware versions.
 
-**The deebot-client version matters.** Two of the three patches are
+**The deebot-client version matters.** All three patches are
 full-file replacements. Applying them over a different library version
 will silently revert unrelated upstream changes in those files. If your
 version differs from 18.3.0, diff the patches against your installed files
@@ -64,13 +64,19 @@ Three files, drop-in replacements for the ones inside the HA container:
 
 - **`patches/cr0e4u.py`** replaces `deebot_client/hardware/cr0e4u.py`.
   Swaps `GetCleanInfoV2` for `GetCleanInfo` (the A3000 answers this one)
-  and wires the clean action to `CleanMower`.
+  and wires the clean action to `CleanMowerArea`.
 
 - **`patches/clean.py`** replaces `deebot_client/commands/json/clean.py`.
-  Adds a `CleanMower` command class: `clean` endpoint, `{"type": "auto"}`
-  payload for all four actions. Note: `"area"` and `""` are both rejected by
-  the A3000 with `msg: "unknow type"`, and the response carries `code: 0`,
-  so it fails silently if you only check the code.
+  Adds two command classes. `CleanMower`: `clean` endpoint (not `clean_V2`),
+  `{"type": "auto"}` payload for all four actions. Note: `"area"` and `""`
+  are both rejected by the A3000 with `msg: "unknow type"`, and the response
+  carries `code: 0`, so it fails silently if you only check the code.
+  `CleanMowerArea` (what cr0e4u.py actually uses): on START, reads
+  comma-separated zone IDs from `/tmp/goat_zones` inside the container
+  (written by HA before each mow), sends
+  `{"type": "spotArea", "value": "..."}`, and deletes the file so stale
+  zones never leak into the next run. If the file is absent or empty it
+  falls back to full-auto, identical to `CleanMower`.
 
 - **`patches/messages_json_init.py`** replaces `deebot_client/messages/json/__init__.py`.
   Two additions: routes `onScheduleTaskInfo` to the getCleanInfo handler
