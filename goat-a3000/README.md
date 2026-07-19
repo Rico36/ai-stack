@@ -22,7 +22,7 @@ that replaces the Ecovacs app as the scheduler.
 Not tested on: HA OS or HA Supervised (no direct `docker exec` access to
 the HA container there), other GOAT models, other firmware versions.
 
-**The deebot-client version matters.** Two of the three patches are
+**The deebot-client version matters.** All three patches are
 full-file replacements. Applying them over a different library version
 will silently revert unrelated upstream changes in those files. If your
 version differs from 18.3.0, diff the patches against your installed files
