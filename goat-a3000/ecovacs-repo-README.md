@@ -38,8 +38,14 @@ and port the changes by hand (they are small; see "The patches" below).
 Check your version with:
 
 ```bash
-docker exec home-assistant python -c "import deebot_client; print(deebot_client.__version__)"
+docker exec home-assistant python -c \
+  "import importlib.metadata; print(importlib.metadata.version('deebot-client'))"
 ```
+
+(The library has no `__version__` attribute, so `deebot_client.__version__`
+does not work. This reports the pip-installed site-packages copy; the
+vendored copy in the custom integration carries no version metadata —
+check the custom integration's `manifest.json` instead.)
 
 ## The problems
 
