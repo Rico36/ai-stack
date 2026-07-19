@@ -23,7 +23,7 @@ yours matches, the more likely they work unmodified.
 | Mower | GOAT A3000 LiDAR, model `cr0e4u`, firmware 1.13.31 |
 | Home Assistant | Container install (Docker), container name `home-assistant` |
 | Host | Raspberry Pi, Raspberry Pi OS (64-bit) |
-| Ecovacs integration library | deebot-client **18.3.0** |
+| Ecovacs integration library | deebot-client **18.3.0** (site-packages, classic setup). Since July 2026 the active copy is the custom integration's vendored deebot-client, based on **18.4.0** — see the July 2026 section |
 | Python inside the HA container | 3.14 (`/usr/local/lib/python3.14/site-packages/`) |
 | Container updates | Watchtower (see "Surviving container updates") |
 
@@ -130,7 +130,12 @@ for the build and install instructions. Summary:
    (on this setup: `/home/admin/homeassistant/custom_components/ecovacs/`).
 2. Re-apply the three GOAT patches to the **vendored** copy — same files,
    new base path: `/config/custom_components/ecovacs/vendor/deebot_client/`
-   instead of site-packages inside the container.
+   instead of site-packages inside the container. The vendored library is
+   based on deebot-client **18.4.0**; the 18.3.0-based patch files apply
+   safely because `cr0e4u.py` and `messages/json/__init__.py` are identical
+   in both versions, and the only upstream change in `clean.py`
+   (a `cleanings` parameter on `CleanAreaV2`) is a vacuum-only command the
+   GOAT never uses.
 3. Restart HA. The integration prompts for a verification code sent to
    your Ecovacs account email. Enter it — done.
 
