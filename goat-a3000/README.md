@@ -15,7 +15,7 @@ that replaces the Ecovacs app as the scheduler.
 | Mower | GOAT A3000 LiDAR, model `cr0e4u`, firmware 1.13.31 |
 | Home Assistant | Container install (Docker), container name `home-assistant` |
 | Host | Raspberry Pi, Raspberry Pi OS (64-bit) |
-| Ecovacs integration library | deebot-client **18.3.0** |
+| Ecovacs integration library | deebot-client **18.3.0** (site-packages, classic setup). Since July 2026 the active copy is the community custom integration's vendored deebot-client, based on **18.4.0** (email device verification / error 1013 fix) |
 | Python inside the HA container | 3.14 (`/usr/local/lib/python3.14/site-packages/`) |
 | Container updates | Watchtower (see "Surviving container updates") |
 
@@ -88,6 +88,30 @@ patches are intact. Root crontab:
 
 ```
 0 * * * * /home/admin/goat-a3000/validate-patches.sh >> /home/admin/patch.log 2>&1
+```
+
+### July 2026 — Ecovacs auth change (error 1013)
+
+Ecovacs changed authentication server-side in July 2026: logins now
+require email device verification, and every deebot-client release fails
+with error 1013 ("Please update"). The fix is a community custom
+integration with the new auth flow installed at
+`/config/custom_components/ecovacs/` (see
+[home-assistant/core #176484](https://github.com/home-assistant/core/issues/176484)),
+with the three GOAT patches re-applied to its vendored
+`vendor/deebot_client/` copy.
+
+On ARM hosts (Raspberry Pi), the custom integration's bundled Rust
+extension is x86_64-only and the integration fails to load with
+`ModuleNotFoundError: No module named 'deebot_client.rs.map'`.
+`patch-rs-imports.py` in this folder wraps all nine `deebot_client.rs`
+import sites with pure-Python fallbacks — map image rendering is lost,
+mowing control and state are unaffected:
+
+```bash
+sudo python3 patch-rs-imports.py
+sudo find /home/admin/homeassistant/custom_components/ecovacs/vendor -name '*.pyc' -delete
+docker restart home-assistant
 ```
 
 ### Zone IDs (cr0e4u)
