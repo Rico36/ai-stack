@@ -173,10 +173,26 @@ and all automations are unaffected.
 
 ### When the official fix ships
 
-The email-verification flow is being upstreamed. Once a Home Assistant
-release includes it: delete `/config/custom_components/ecovacs/`, restart
-HA to fall back to the stock integration, and re-apply the three GOAT
-patches to site-packages the classic way (`scripts/apply-patches.sh`).
+The email-verification flow is being upstreamed — watch
+[home-assistant/core #176484](https://github.com/home-assistant/core/issues/176484)
+and the deebot-client releases. Until you act, nothing changes: HA always
+prefers `custom_components/` over the built-in integration, so the custom
+build keeps running even after a fixed core ships. Don't stay on it
+indefinitely, though — it is frozen at core 2026.7.2 and will eventually
+break on some future HA update.
+
+Rollback, once your container has an HA version with the fix:
+
+1. Delete `/config/custom_components/ecovacs/` (removes the vendored
+   library, its patches, and the aarch64 stubs in one go — the Rust
+   extension problem is unique to the community bundle; PyPI wheels
+   have proper aarch64 builds).
+2. Restart HA — the stock integration loads. Expect a one-time re-auth
+   prompt (the new flow may re-verify your email).
+3. Re-apply the three GOAT patches to site-packages
+   (`scripts/apply-patches.sh`) — **diff first** if deebot-client moved
+   past 18.4.0; the patches are full-file replacements.
+4. The hourly `check-patches.sh` cron resumes guard duty automatically.
 
 ## Surviving container updates
 
