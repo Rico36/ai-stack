@@ -2,229 +2,255 @@
 """
 Patch deebot_client Rust extension imports for aarch64 compatibility.
 
-The community ecovacs custom integration ships a Rust extension
-(rs.cpython-314-x86_64-linux-musl.so) compiled only for x86_64.
-This script wraps each import with try/except ImportError so the
-integration loads on a Raspberry Pi (aarch64) without the .so.
+The community ecovacs custom integration (email-device-auth build) ships a
+Rust extension compiled only for x86_64 (rs.cpython-314-x86_64-linux-musl.so).
+On a Raspberry Pi (aarch64) every `deebot_client.rs` import fails with
+ModuleNotFoundError and the integration cannot load.
 
-Map features (rotation, position overlays, decompression) degrade
-gracefully; mowing control and state are unaffected.
+This script wraps all nine import sites with try/except ImportError and
+provides pure-Python stubs. Map rendering degrades to "no image"; mowing
+control, state, zones, and events are unaffected.
+
+Covers:
+  - 6 absolute imports  (from deebot_client.rs.map / .rs.util ...)
+  - 1 TYPE_CHECKING import (events/map.py)
+  - 2 relative imports  (map.py, device.py — from .rs.map ...)
 
 Run on the Raspberry Pi:
-    python3 /home/admin/goat-a3000/patch-rs-imports.py
+    sudo python3 patch-rs-imports.py
 
-Safe to re-run — skips files already patched.
+Idempotent: files whose import is already wrapped are skipped. After
+patching, clear stale bytecode and restart HA:
+    sudo find <vendor> -name '*.pyc' -delete
+    docker restart home-assistant
 """
 
-import re
 import sys
 from pathlib import Path
 
 VENDOR = Path("/home/admin/homeassistant/custom_components/ecovacs/vendor/deebot_client")
 
-# ── fallback bodies ────────────────────────────────────────────────────────────
+# ── stub blocks ───────────────────────────────────────────────────────────────
 
-ROTATION_ANGLE_FALLBACK = """\
+ROTATION_ANGLE_STUB = """\
 try:
     from deebot_client.rs.map import RotationAngle
 except ImportError:
-    class RotationAngle:  # type: ignore[no-redef]
-        \"\"\"Pure-Python stub — Rust extension unavailable on aarch64.\"\"\"
-        def __init__(self, value: int = 0) -> None:
-            self._value = int(value)
+    from enum import IntEnum as _IntEnum
+
+    class RotationAngle(_IntEnum):  # type: ignore[no-redef]
+        DEG_0 = 0
+        DEG_90 = 90
+        DEG_180 = 180
+        DEG_270 = 270
+
         @classmethod
-        def from_int(cls, value: int) -> "RotationAngle":
-            return cls(value)
-        def __int__(self) -> int:
-            return self._value
-        def __eq__(self, other: object) -> bool:
-            if isinstance(other, RotationAngle):
-                return self._value == other._value
-            return NotImplemented
-        def __repr__(self) -> str:
-            return f"RotationAngle({self._value})"
+        def from_int(cls, value):
+            try:
+                return cls(int(value))
+            except ValueError:
+                return cls.DEG_0
 """
 
-POSITION_TYPE_FALLBACK = """\
+POSITION_TYPE_STUB = """\
 try:
     from deebot_client.rs.map import PositionType
 except ImportError:
     import enum
+
     class PositionType(str, enum.Enum):  # type: ignore[no-redef]
-        \"\"\"Pure-Python stub — Rust extension unavailable on aarch64.\"\"\"
         DEEBOT = "deebot_pos"
         CHARGER = "chargebase_pos"
 """
 
-ROTATION_AND_POSITION_FALLBACK = """\
+POSITION_TYPE_RELATIVE_STUB = """\
 try:
-    from deebot_client.rs.map import PositionType, RotationAngle
+    from .rs.map import PositionType
 except ImportError:
     import enum
+
     class PositionType(str, enum.Enum):  # type: ignore[no-redef]
-        \"\"\"Pure-Python stub — Rust extension unavailable on aarch64.\"\"\"
         DEEBOT = "deebot_pos"
         CHARGER = "chargebase_pos"
-    class RotationAngle:  # type: ignore[no-redef]
-        \"\"\"Pure-Python stub — Rust extension unavailable on aarch64.\"\"\"
-        def __init__(self, value: int = 0) -> None:
-            self._value = int(value)
-        @classmethod
-        def from_int(cls, value: int) -> "RotationAngle":
-            return cls(value)
-        def __int__(self) -> int:
-            return self._value
-        def __eq__(self, other: object) -> bool:
-            if isinstance(other, RotationAngle):
-                return self._value == other._value
-            return NotImplemented
 """
 
-DECOMPRESS_FALLBACK = """\
+DECOMPRESS_STUB = """\
 try:
     from deebot_client.rs.util import decompress_base64_data
 except ImportError:
-    import base64 as _b64, zlib as _zlib
-    def decompress_base64_data(data: str) -> bytes:  # type: ignore[misc]
-        \"\"\"Pure-Python fallback — Rust extension unavailable on aarch64.\"\"\"
+    import base64 as _b64
+    import zlib as _zlib
+
+    def decompress_base64_data(data):  # type: ignore[misc]
         raw = _b64.b64decode(data)
-        # Try raw deflate first (wbits=-15), then zlib, then gzip.
         for wbits in (-15, 15, 47):
             try:
                 return _zlib.decompress(raw, wbits)
             except _zlib.error:
                 continue
-        return raw  # last resort: return raw bytes
+        return raw
 """
 
-# ── sentinel string that marks a file as already patched ──────────────────────
-SENTINEL = "# aarch64-rs-patch-applied"
+# map.py needs a functional MapData stub: MapData() is instantiated per device
+# and its attributes are hit by live map events from the mower.
+MAP_DATA_STUB = """\
+try:
+    from .rs.map import MapData as MapDataRs, RotationAngle
+except ImportError:
+    # aarch64: bundled Rust extension is x86_64-only. Pure-Python stubs;
+    # map rendering degrades to "no image", mowing control unaffected.
+    from enum import IntEnum as _IntEnum
 
-# ── patch rules: (file_relative_path, original_import_line, replacement) ──────
+    class RotationAngle(_IntEnum):  # type: ignore[no-redef]
+        DEG_0 = 0
+        DEG_90 = 90
+        DEG_180 = 180
+        DEG_270 = 270
+
+        @classmethod
+        def from_int(cls, value):
+            try:
+                return cls(int(value))
+            except ValueError:
+                return cls.DEG_0
+
+    class _StubTracePoints:
+        def add(self, value):
+            pass
+
+        def clear(self):
+            pass
+
+    class _StubBackgroundImage:
+        def update_map_piece(self, index, base64_data):
+            return False
+
+        def map_piece_crc32_indicates_update(self, index, crc32):
+            return False
+
+    class _StubMapInfo:
+        def set(self, base64_info):
+            pass
+
+    class MapDataRs:  # type: ignore[no-redef]
+        def __init__(self):
+            self.trace_points = _StubTracePoints()
+            self.background_image = _StubBackgroundImage()
+            self.map_info = _StubMapInfo()
+
+        def generate_svg(self, subsets, positions, rotation):
+            return None
+"""
+
+# events/map.py: import lives in a TYPE_CHECKING block (never executed at
+# runtime), so a plain pass fallback is enough.
+EVENTS_MAP_OLD = "    from deebot_client.rs.map import PositionType, RotationAngle\n"
+EVENTS_MAP_NEW = """\
+    try:
+        from deebot_client.rs.map import PositionType, RotationAngle
+    except ImportError:
+        pass
+"""
+
+# ── patch table: (relative path, exact original import line, replacement) ────
+
 PATCHES = [
-    (
-        "messages/json/map/cached_map_info.py",
-        r"^from deebot_client\.rs\.map import RotationAngle\s*$",
-        ROTATION_ANGLE_FALLBACK,
-    ),
-    (
-        "messages/xml/pos.py",
-        r"^from deebot_client\.rs\.map import PositionType\s*$",
-        POSITION_TYPE_FALLBACK,
-    ),
-    (
-        "commands/json/map/__init__.py",
-        r"^from deebot_client\.rs\.util import decompress_base64_data\s*$",
-        DECOMPRESS_FALLBACK,
-    ),
-    (
-        "commands/json/pos.py",
-        r"^from deebot_client\.rs\.map import PositionType\s*$",
-        POSITION_TYPE_FALLBACK,
-    ),
-    (
-        "commands/xml/map.py",
-        r"^from deebot_client\.rs\.map import RotationAngle\s*$",
-        ROTATION_ANGLE_FALLBACK,
-    ),
-    (
-        "commands/xml/pos.py",
-        r"^from deebot_client\.rs\.map import PositionType\s*$",
-        POSITION_TYPE_FALLBACK,
-    ),
+    ("map.py",
+     "from .rs.map import MapData as MapDataRs, RotationAngle\n",
+     MAP_DATA_STUB),
+    ("device.py",
+     "from .rs.map import PositionType\n",
+     POSITION_TYPE_RELATIVE_STUB),
+    ("messages/json/map/cached_map_info.py",
+     "from deebot_client.rs.map import RotationAngle\n",
+     ROTATION_ANGLE_STUB),
+    ("messages/xml/pos.py",
+     "from deebot_client.rs.map import PositionType\n",
+     POSITION_TYPE_STUB),
+    ("commands/json/map/__init__.py",
+     "from deebot_client.rs.util import decompress_base64_data\n",
+     DECOMPRESS_STUB),
+    ("commands/json/pos.py",
+     "from deebot_client.rs.map import PositionType\n",
+     POSITION_TYPE_STUB),
+    ("commands/xml/map.py",
+     "from deebot_client.rs.map import RotationAngle\n",
+     ROTATION_ANGLE_STUB),
+    ("commands/xml/pos.py",
+     "from deebot_client.rs.map import PositionType\n",
+     POSITION_TYPE_STUB),
+    ("events/map.py",
+     EVENTS_MAP_OLD,
+     EVENTS_MAP_NEW),
 ]
 
-# events/map.py imports inside TYPE_CHECKING — handled separately below
-EVENTS_MAP = "events/map.py"
-EVENTS_MAP_PATTERN = r"^(\s+)from deebot_client\.rs\.map import PositionType, RotationAngle\s*$"
 
-
-def patch_file(rel_path: str, pattern: str, replacement: str) -> str:
-    """Return 'skipped', 'patched', or 'not_found'."""
+def patch_file(rel_path, old, new):
     path = VENDOR / rel_path
     if not path.exists():
-        return "not_found"
+        return "MISSING"
 
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
 
-    if SENTINEL in text:
-        return "skipped"
+    # No pristine deebot_client file contains "except ImportError" — its
+    # presence means this file was already patched (by this script or an
+    # earlier manual fix, regardless of wrapping style).
+    if "except ImportError" in text:
+        return "SKIP"
 
-    new_text, count = re.subn(pattern, replacement, text, flags=re.MULTILINE)
-    if count == 0:
-        return "skipped"
+    if old not in text:
+        return "SKIP"
 
-    # Prepend sentinel comment to the file
-    new_text = f"# {SENTINEL}\n" + new_text
-    path.write_text(new_text)
-    return "patched"
+    import py_compile
+    import tempfile
 
+    patched = text.replace(old, new, 1)
 
-def patch_events_map() -> str:
-    """
-    events/map.py imports inside a TYPE_CHECKING block — wrap the whole
-    block guard so it only imports if the Rust extension is available.
-    """
-    path = VENDOR / EVENTS_MAP
-    if not path.exists():
-        return "not_found"
+    # Compile-check before touching the real file.
+    with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False,
+                                     encoding="utf-8") as tmp:
+        tmp.write(patched)
+        tmp_path = tmp.name
+    try:
+        py_compile.compile(tmp_path, doraise=True)
+    except py_compile.PyCompileError as err:
+        Path(tmp_path).unlink(missing_ok=True)
+        print(f"  COMPILE ERROR in {rel_path}: {err}")
+        return "ERROR"
+    Path(tmp_path).unlink(missing_ok=True)
 
-    text = path.read_text()
-    if SENTINEL in text:
-        return "skipped"
-
-    # Check if the import exists
-    if not re.search(EVENTS_MAP_PATTERN, text, re.MULTILINE):
-        return "skipped"
-
-    def replacer(m: re.Match) -> str:
-        indent = m.group(1)
-        return (
-            f"{indent}try:\n"
-            f"{indent}    from deebot_client.rs.map import PositionType, RotationAngle\n"
-            f"{indent}except ImportError:\n"
-            f"{indent}    pass  # stubs defined at module level if needed\n"
-        )
-
-    new_text = re.sub(EVENTS_MAP_PATTERN, replacer, text, flags=re.MULTILINE)
-    new_text = f"# {SENTINEL}\n" + new_text
-    path.write_text(new_text)
-    return "patched"
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(patched)
+    return "PATCHED"
 
 
-def main() -> int:
+def main():
     if not VENDOR.exists():
         print(f"ERROR: vendor directory not found: {VENDOR}")
-        print("Make sure the ecovacs custom integration is installed at")
-        print("  /home/admin/homeassistant/custom_components/ecovacs/")
         return 1
 
-    print(f"\nPatching Rust imports in {VENDOR}\n")
+    print(f"\nPatching Rust-extension imports in {VENDOR}\n")
 
-    results = {}
-    for rel_path, pattern, replacement in PATCHES:
-        status = patch_file(rel_path, pattern, replacement)
-        results[rel_path] = status
-        icon = {"patched": "PATCHED", "skipped": "SKIP   ", "not_found": "MISSING"}[status]
-        print(f"  {icon}  {rel_path}")
-
-    status = patch_events_map()
-    results[EVENTS_MAP] = status
-    icon = {"patched": "PATCHED", "skipped": "SKIP   ", "not_found": "MISSING"}[status]
-    print(f"  {icon}  {EVENTS_MAP}")
-
-    missing = [k for k, v in results.items() if v == "not_found"]
-    patched = [k for k, v in results.items() if v == "patched"]
+    errors = 0
+    patched = 0
+    for rel_path, old, new in PATCHES:
+        status = patch_file(rel_path, old, new)
+        print(f"  {status:8s} {rel_path}")
+        if status == "ERROR":
+            errors += 1
+        elif status == "PATCHED":
+            patched += 1
 
     print()
-    if missing:
-        print(f"WARNING: {len(missing)} file(s) not found — check VENDOR path above.")
+    if errors:
+        print(f"{errors} file(s) failed the compile check — NOT modified.")
+        return 1
     if patched:
-        print(f"Applied {len(patched)} patch(es). Restart Home Assistant to pick them up.")
+        print(f"Applied {patched} patch(es). Now clear bytecode and restart HA:")
+        print(f"  sudo find {VENDOR.parent} -name '*.pyc' -delete")
         print("  docker restart home-assistant")
     else:
-        print("Nothing to patch — all files already patched or targets not found.")
-
+        print("Nothing to do — all files already patched or targets absent.")
     return 0
 
 
