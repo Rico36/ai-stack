@@ -622,6 +622,13 @@ automation:
         entity_id: input_boolean.goat_mowing_session_active
         state: "off"
     action:
+      # Pause first, decide second: halt the mower immediately (single MQTT
+      # command, no cloud API wait) so it never races HA to the closed
+      # garage door while the forecast is fetched and evaluated.
+      - service: lawn_mower.pause
+        target:
+          entity_id: lawn_mower.goat_a3000_lidar
+
       - service: weather.get_forecasts
         target:
           entity_id: weather.pirateweather
@@ -682,10 +689,16 @@ automation:
 
           - service: script.goat_open_garage
 
+          # Mower was paused on detection; garage is confirmed open now.
+          # start_mowing converts to RESUME while paused (patched clean.py).
+          - service: lawn_mower.start_mowing
+            target:
+              entity_id: lawn_mower.goat_a3000_lidar
+
           - service: script.goat_notify
             data:
               title: "Manual mowing session detected"
-              message: "Mower started outside of schedule. Garage opened and automation sequence activated."
+              message: "Mower started outside of schedule. Garage opened, mowing resumed, automation sequence activated."
 
           - delay: "00:01:00"
 
