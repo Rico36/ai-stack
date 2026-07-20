@@ -64,7 +64,6 @@ input_select:
       - Uncertain
       - Dry
       - Wet
-    initial: Uncertain
     icon: mdi:grass
 
 
@@ -121,7 +120,6 @@ input_text:
     # Where the first number "3" in this example, is Area 1, "2" is Area 2, "6" is Area 3, etc.
     # These numbers can/will be different in your own App environment.
     name: GOAT Zone IDs
-    initial: "3,2,6,4,7,5"
     max: 30
 
 sensor:
