@@ -799,9 +799,20 @@ automation:
       - condition: state
         entity_id: input_boolean.goat_automation_enabled
         state: "on"
-      - condition: state
-        entity_id: input_boolean.goat_mowing_session_active
-        state: "on"
+      # Fire when HA authorized the session OR the mower is actually out
+      # working. The OR covers unauthorized runs (session never set) —
+      # e.g. rain-branch dock refused because the mower errored.
+      - condition: or
+        conditions:
+          - condition: state
+            entity_id: input_boolean.goat_mowing_session_active
+            state: "on"
+          - condition: state
+            entity_id: lawn_mower.goat_a3000_lidar
+            state:
+              - "mowing"
+              - "paused"
+              - "returning"
     action:
       - service: script.goat_notify
         data:
