@@ -689,6 +689,15 @@ automation:
 
           - service: script.goat_open_garage
 
+          # Wait until HA has actually seen the paused state. If the garage
+          # is already open, this point is reached ~0.2s after the pause
+          # command — before the mower reports paused — and start_mowing
+          # would NOT convert to RESUME (it checks HA's last known state),
+          # sending a plain start that the mower silently ignores.
+          - wait_template: "{{ is_state('lawn_mower.goat_a3000_lidar', 'paused') }}"
+            timeout: "00:00:30"
+            continue_on_timeout: true
+
           # Mower was paused on detection; garage is confirmed open now.
           # start_mowing converts to RESUME while paused (patched clean.py).
           - service: lawn_mower.start_mowing
