@@ -83,16 +83,22 @@ matches wins:
 | P3 | Manual override hold | override flag on (and not expired) | status held as-is |
 | P4 | Delta cancellation | delta flag on AND moisture ≤ dry baseline | **Dry** — clears delta flag, stores the settled value as the new baseline |
 | P5 | Delta hold | delta flag on, moisture still above the baseline | held **Wet** |
-| P6 | High moisture | moisture > 79% AND above the dry baseline | **Wet** |
-| P7 | Normal dry | moisture ≤ dry baseline | **Dry** |
+| P6 | Morning dew | 4–10 AM AND moisture > 51% AND above the dry baseline | **Wet** |
+| P7 | High moisture | moisture > 79% AND above the dry baseline | **Wet** |
+| P8 | Normal dry | moisture ≤ dry baseline | **Dry** |
 
 If no rule matches, the last status holds ("Uncertain" if never set).
+
+Morning's special role: above the baseline, morning goes Wet immediately
+(daytime holds the previous status in that band until 79% is crossed).
+At or below the baseline the grass is Dry at any hour — dew that stays
+under an established baseline does not flip the status.
 
 ### The dry baseline (`goat_moisture_baseline`)
 
 The "dry baseline" is the moisture level known to be dry — **69%** by
-default (when the helper is 0/unset), and honored at **all hours**: there
-are no morning rules and no scheduled reset. It changes only three ways:
+default (when the helper is 0/unset), and honored at **all hours**; it is
+never reset on a schedule. It changes only three ways:
 
 - **Manual Dry** from the dashboard saves the current soil moisture as the
   baseline. Example: you set Dry at 76% → any reading ≤ 76% counts as Dry
