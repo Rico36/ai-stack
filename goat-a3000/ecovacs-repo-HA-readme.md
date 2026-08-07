@@ -176,9 +176,9 @@ These are advisory — the authoritative go/no-go decision still happens in
      - Notifies (regular)
 3. **Mower → mowing**
    - `GOAT - Close Garage When Mowing Starts` fires (because `departure_window_active` = on) → waits 1 min → closes garage → turns off `departure_window_active`
-   - `GOAT - Manual Start Detected` does **not** fire — `mowing_session_active` is already on, condition fails
+   - `GOAT - Departure Handler` does **not** fire — `departure_window_active` was on at the transition, condition fails
 4. **Mower → returning** — `GOAT - Open Garage When Returning` fires → opens garage, sets status "Returning", notifies (regular)
-5. **Mower → docked** — `GOAT - Close Garage When Docked` fires → waits 1 min → closes garage → turns off `mowing_session_active` + `goat_makeup_pending`, notifies (regular)
+5. **Mower → docked** — `GOAT - Close Garage When Docked` fires → waits 1 min → closes garage, then checks the workComplete marker (see "Mid-run recharge" below): run complete → turns off `mowing_session_active` + `goat_makeup_pending`, notifies (regular); no marker → recharge break, session stays active
 6. **At session_started_at + 120 min** (fallback) — `GOAT - Not Docked Fallback Alert` fires only if still not docked → **critical** notify
 
 **If anything goes wrong mid-session:**
@@ -204,14 +204,36 @@ These are advisory — the authoritative go/no-go decision still happens in
      - Calls `lawn_mower.start_mowing` → mower starts immediately (no Ecovacs schedule needed)
      - Notifies "Scheduled mowing started" (regular)
 4. **Mower → mowing**
-   - `GOAT - Manual Start Detected` does **not** fire — `mowing_session_active` is already on
+   - `GOAT - Departure Handler` does **not** fire — `departure_window_active` is on
    - `GOAT - Close Garage When Mowing Starts` fires → waits 1 min → closes garage
 5. Steps 4–6 from Scenario 1 apply identically from here
 
-**Unauthorized start** (mower starts via physical button or any path outside HA):
-- `GOAT - Manual Start Detected` fires (condition: `mowing_session_active` = off)
-- Checks weather → if rain forecast → docks + **critical** notify "Mower stopped due to weather"
-- If clear → opens garage, sets `mowing_session_active` on, notifies (regular), closes garage after 1 min
+**Unauthorized start or recharge resume** (any `docked → mowing` transition HA
+did not initiate — app start, physical button, or the mower resuming a
+mid-run recharge on its own):
+- `GOAT - Departure Handler` fires (condition: `departure_window_active` = off)
+- **Pauses the mower immediately** (so it can't race HA to a closed garage
+  door), then checks the rain forecast
+- Rain forecast → docks + **critical** notify "Mower stopped due to weather"
+- Clear → authorizes the session, stamps the session clock (re-arming the
+  95-min and 2-hour windows after a recharge), opens the garage, resumes
+  (start_mowing converts to RESUME while paused), notifies, closes the
+  garage after 1 min
+
+**Mid-run recharge** (low battery, mower docks to charge, then resumes):
+- The mower only emits `workComplete` when a run truly finishes (~2 min
+  before the final dock). The patched vendored `clean.py` writes
+  `/tmp/goat_work_complete` when it sees it, and
+  `shell_command.goat_check_work_complete` reports whether the marker is
+  fresh (< 20 min). Battery level is deliberately not used — runs have
+  been observed completing at 17%.
+- Dock **with** a fresh marker → run complete: session closed, "Mower
+  docked" notification
+- Dock **without** a marker → recharge break: garage closes, session
+  stays active, "Mower recharging" notification; when the mower resumes,
+  the Departure Handler reopens the garage
+- Safety net: `GOAT - Session Cleanup After Long Charge` closes out any
+  session still active after 3 hours docked
 
 ---
 
