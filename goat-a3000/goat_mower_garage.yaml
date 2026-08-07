@@ -131,6 +131,14 @@ shell_command:
   # Zone IDs: 2=Front Street, 3=Front, 4=Left Side Street,
   #           5=Backyard Side, 6=Left Side, 7=Backyard
   goat_write_zones: "python3 -c \"open('/tmp/goat_zones', 'w').write('{{ states(\"input_text.goat_zone_ids\") }}')\""
+  # Prints 1 if the patched deebot_client wrote the workComplete marker
+  # within the last 20 minutes (run genuinely finished), else 0. Used by
+  # GOAT - Close Garage When Docked to tell end-of-run docks from mid-run
+  # recharge docks. The marker is written by the vendored clean.py patch.
+  goat_check_work_complete: >-
+    /bin/sh -c 'f=/tmp/goat_work_complete;
+    if [ -f "$f" ] && [ $(( $(date +%s) - $(stat -c %Y "$f") )) -lt 1200 ];
+    then echo 1; else echo 0; fi'
 
 script:
   goat_notify:
@@ -913,39 +921,47 @@ automation:
     action:
       - delay: "00:01:00"
       - service: script.goat_close_garage
+      # The mower pushes onCleanInfo trigger "workComplete" ~2 minutes
+      # before the final dock; the patched vendored clean.py writes
+      # /tmp/goat_work_complete when it sees it. A fresh marker (< 20 min)
+      # means the run genuinely finished; no marker means this dock is a
+      # mid-run recharge. Battery level deliberately plays no role — runs
+      # have been observed completing at 17%.
+      - service: shell_command.goat_check_work_complete
+        response_variable: work_complete
       - choose:
-          # Docked with a low battery = mid-run recharge, not the end of the
-          # run. Keep the session active; GOAT - Resume After Recharge
-          # handles the departure when the mower resumes on its own.
-          # If it never resumes, GOAT - Session Cleanup After Long Charge
-          # closes the session after 3 hours docked.
+          # Run complete — close out the session
           - conditions:
-              - condition: numeric_state
-                entity_id: sensor.goat_a3000_lidar_battery
-                below: 40
+              - condition: template
+                value_template: "{{ (work_complete.stdout | default('0')) | trim == '1' }}"
             sequence:
               - service: input_boolean.turn_off
                 target:
-                  entity_id: input_boolean.goat_departure_window_active
+                  entity_id:
+                    - input_boolean.goat_departure_window_active
+                    - input_boolean.goat_mowing_session_active
+                    - input_boolean.goat_makeup_pending
+
               - service: script.goat_notify
                 data:
-                  title: "Mower recharging"
-                  message: >
-                    Mower docked to recharge at
-                    {{ states('sensor.goat_a3000_lidar_battery') }}% battery.
-                    Session stays active — garage will reopen when it resumes.
+                  title: "Mower docked"
+                  message: "Mowing complete. Garage close sequence completed."
+        # No fresh workComplete marker = mid-run recharge. Keep the session
+        # active; GOAT - Resume After Recharge handles the departure when
+        # the mower resumes on its own. If it never resumes, GOAT - Session
+        # Cleanup After Long Charge closes the session after 3 hours docked.
         default:
           - service: input_boolean.turn_off
             target:
-              entity_id:
-                - input_boolean.goat_departure_window_active
-                - input_boolean.goat_mowing_session_active
-                - input_boolean.goat_makeup_pending
-
+              entity_id: input_boolean.goat_departure_window_active
           - service: script.goat_notify
             data:
-              title: "Mower docked"
-              message: "Mower is docked. Garage close sequence completed."
+              title: "Mower recharging"
+              message: >
+                Mower docked without a work-complete signal — treating as a
+                recharge break at
+                {{ states('sensor.goat_a3000_lidar_battery') }}% battery.
+                Session stays active; garage will reopen when it resumes.
 
   - alias: GOAT - Resume After Recharge
     id: goat_resume_after_recharge

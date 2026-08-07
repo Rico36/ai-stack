@@ -128,6 +128,17 @@ class GetCleanInfo(JsonCommandWithMessageHandling, MessageBodyDataDict):
         :return: A message response
         """
         global _LAST_TASK_TYPE  # noqa: PLW0603
+        # Surface run completion to HA: "workComplete" arrives ~2 min before
+        # the final dock and is the only signal that distinguishes an
+        # end-of-run dock from a mid-run recharge dock (battery level cannot
+        # — runs have been observed completing at 17%). HA checks this
+        # marker's freshness via shell_command.goat_check_work_complete.
+        if data.get("trigger") == "workComplete":
+            try:
+                with open("/tmp/goat_work_complete", "w") as f:
+                    f.write("1")
+            except OSError:
+                pass
         status: State | None = None
         state = data.get("state")
         if data.get("trigger") == "alert":
