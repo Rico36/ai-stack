@@ -872,6 +872,14 @@ automation:
         entity_id: input_boolean.goat_mowing_session_active
         state: "on"
 
+      # Don't open the garage while the mower is sitting on the charger
+      # (mid-run recharge keeps the session active with the mower docked)
+      - condition: not
+        conditions:
+          - condition: state
+            entity_id: lawn_mower.goat_a3000_lidar
+            state: "docked"
+
     action:
       - service: script.goat_notify
         data:
@@ -905,17 +913,129 @@ automation:
     action:
       - delay: "00:01:00"
       - service: script.goat_close_garage
+      - choose:
+          # Docked with a low battery = mid-run recharge, not the end of the
+          # run. Keep the session active; GOAT - Resume After Recharge
+          # handles the departure when the mower resumes on its own.
+          # If it never resumes, GOAT - Session Cleanup After Long Charge
+          # closes the session after 3 hours docked.
+          - conditions:
+              - condition: numeric_state
+                entity_id: sensor.goat_a3000_lidar_battery
+                below: 40
+            sequence:
+              - service: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.goat_departure_window_active
+              - service: script.goat_notify
+                data:
+                  title: "Mower recharging"
+                  message: >
+                    Mower docked to recharge at
+                    {{ states('sensor.goat_a3000_lidar_battery') }}% battery.
+                    Session stays active — garage will reopen when it resumes.
+        default:
+          - service: input_boolean.turn_off
+            target:
+              entity_id:
+                - input_boolean.goat_departure_window_active
+                - input_boolean.goat_mowing_session_active
+                - input_boolean.goat_makeup_pending
+
+          - service: script.goat_notify
+            data:
+              title: "Mower docked"
+              message: "Mower is docked. Garage close sequence completed."
+
+  - alias: GOAT - Resume After Recharge
+    id: goat_resume_after_recharge
+    description: >
+      The mower resumes a mid-run recharge on its own (docked -> mowing
+      while the session is still active). The garage is closed at that
+      point, so run the pause-first departure: halt the mower, open the
+      garage, resume, and close behind it. The departure-window condition
+      excludes HA-initiated starts, which open the garage before sending
+      start_mowing.
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: lawn_mower.goat_a3000_lidar
+        from: "docked"
+        to: "mowing"
+    condition:
+      - condition: state
+        entity_id: input_boolean.goat_automation_enabled
+        state: "on"
+      - condition: state
+        entity_id: input_boolean.goat_mowing_session_active
+        state: "on"
+      - condition: state
+        entity_id: input_boolean.goat_departure_window_active
+        state: "off"
+    action:
+      - service: lawn_mower.pause
+        target:
+          entity_id: lawn_mower.goat_a3000_lidar
+
+      - service: script.goat_open_garage
+
+      - wait_template: "{{ is_state('lawn_mower.goat_a3000_lidar', 'paused') }}"
+        timeout: "00:00:30"
+        continue_on_timeout: true
+
+      - service: lawn_mower.start_mowing
+        target:
+          entity_id: lawn_mower.goat_a3000_lidar
+
+      # Re-arm the 95-min expected-return and 2-hour not-docked windows
+      # from the resume, not from the original start
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.goat_mowing_session_started_at
+        data:
+          datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+      - service: script.goat_notify
+        data:
+          title: "Mowing resumed after recharge"
+          message: >
+            Battery at {{ states('sensor.goat_a3000_lidar_battery') }}% —
+            mower resumed. Garage opened for departure.
+
+      - delay: "00:01:00"
+
+      - service: script.goat_close_garage
+
+  - alias: GOAT - Session Cleanup After Long Charge
+    id: goat_session_cleanup_after_long_charge
+    description: >
+      Safety net for a run that ended at a low battery and was misread as
+      a recharge pause: if the mower sits docked for 3 hours with the
+      session still active, the run is over — close out the session.
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: lawn_mower.goat_a3000_lidar
+        to: "docked"
+        for: "03:00:00"
+    condition:
+      - condition: state
+        entity_id: input_boolean.goat_mowing_session_active
+        state: "on"
+    action:
       - service: input_boolean.turn_off
         target:
           entity_id:
             - input_boolean.goat_departure_window_active
             - input_boolean.goat_mowing_session_active
             - input_boolean.goat_makeup_pending
-
       - service: script.goat_notify
         data:
-          title: "Mower docked"
-          message: "Mower is docked. Garage close sequence completed."
+          title: "Mowing session closed"
+          message: >
+            Mower has been docked for 3 hours without resuming — closing
+            out the mowing session.
+
 
   - alias: GOAT - Not Docked Fallback Alert
     id: goat_not_docked_fallback_alert
