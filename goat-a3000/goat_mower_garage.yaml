@@ -1216,12 +1216,14 @@ automation:
       #   Delta cancel: delta_active AND m ≤ dry baseline → Dry, clear delta
       #   Normal dry  : m ≤ dry baseline
       # Dry baseline (input_number.goat_moisture_baseline, fallback 69 when 0):
-      #   set by manual Dry override (current m), by delta scenarios (spike
-      #   stores the 30-min pre-rain minimum; cancel stores the settled
-      #   value), and by the morning-end snapshot: at 10am, if Wet came from
-      #   the morning rule (Wet + no delta + no override), baseline = m - 6,
-      #   so ~6 points of dew evaporation flips the day back to Dry.
-      #   Cleared to 0 by manual Wet override. Never reset on a schedule.
+      #   set ONLY by manual Dry override (current m) and by delta scenarios
+      #   (spike stores the 30-min pre-rain minimum; cancel stores the
+      #   settled value). Cleared to 0 by manual Wet override. Never set from
+      #   an unvalidated reading and never reset on a schedule. Recovery from
+      #   morning Wet happens through the validated rules alone: floor dry,
+      #   normal dry (m ≤ baseline), or a delta cancel. On humid days where
+      #   m plateaus above the baseline, status stays Wet until a manual Dry
+      #   recalibrates the baseline — by design.
       # Delta and morning are the two rules that override the baseline.
       # Delta spike is the only rule that can override a manual override.
       # Manual override auto-expires after 5 hours.
@@ -1324,10 +1326,9 @@ automation:
             sequence:
               - stop: "Delta rule active — awaiting baseline return"
 
-          # P6: Morning dew — Wet, regardless of the dry baseline. Morning
-          # and delta are the two rules that override the baseline. The
-          # morning-end snapshot (10am automation) establishes the recovery
-          # path back to Dry.
+          # P6: Morning dew — Wet, regardless of the dry baseline. Recovery
+          # after 10am comes from the validated rules only: floor dry,
+          # normal dry (m ≤ baseline), or a delta cancel.
           - conditions:
               - condition: template
                 value_template: "{{ morning and m > 51 }}"
@@ -1606,35 +1607,3 @@ automation:
                   The garage door will open automatically for the mower but please
                   make sure the black sensor cover is off. Also, open the backyard gate.
                 </prosody>
-
-
-  - alias: GOAT - Morning End Dry Baseline
-    id: goat_morning_end_dry_baseline
-    description: >
-      At 10am (end of the morning window), if the grass is Wet from the
-      morning dew rule (no delta, no manual override), snapshot the current
-      moisture minus 6 as the dry baseline. As dew evaporates and moisture
-      falls 6 points below the 10am reading, the normal-dry rule flips the
-      status back to Dry. If moisture is already below 55 at 10am, floor
-      dry fires on the next sensor update regardless of the baseline.
-    mode: single
-    trigger:
-      - platform: time
-        at: "10:00:00"
-    condition:
-      - condition: state
-        entity_id: input_select.goat_grass_status
-        state: "Wet"
-      - condition: state
-        entity_id: input_boolean.goat_delta_rule_active
-        state: "off"
-      - condition: state
-        entity_id: input_boolean.goat_grass_status_override
-        state: "off"
-    action:
-      - service: input_number.set_value
-        target:
-          entity_id: input_number.goat_moisture_baseline
-        data:
-          value: >
-            {{ [ (states('sensor.front_rain_sensor_soil_moisture') | float(0)) - 6, 0 ] | max }}

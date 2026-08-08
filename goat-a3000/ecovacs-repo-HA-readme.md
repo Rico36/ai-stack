@@ -93,21 +93,23 @@ If no rule matches, the last status holds ("Uncertain" if never set).
 
 The "dry baseline" is the moisture level known to be dry — **69%** by
 default (when the helper is 0/unset). It is never reset on a schedule,
-and only delta and morning outrank it. It changes four ways:
+never set from an unvalidated reading, and only delta and morning outrank
+it. It changes three ways:
 
 - **Manual Dry** from the dashboard saves the current soil moisture as the
   baseline. Example: you set Dry at 76% → any reading ≤ 76% counts as Dry
   outside the morning window.
 - **Delta scenarios** maintain it automatically: a spike stores the 30-min
   pre-rain minimum; a cancellation stores the settled value.
-- **Morning-end snapshot** (`GOAT - Morning End Dry Baseline`): most
-  mornings, dew trips the morning rule and the day starts Wet. At 10am,
-  if the grass is Wet without a delta or manual override, the baseline is
-  set to the current moisture **minus 6** — once dew evaporation drops
-  moisture 6 points below the 10am reading, normal dry flips the status
-  back to Dry. (If moisture is already below 55 at 10am, floor dry fires
-  on the next sensor update regardless of the baseline.)
 - **Manual Wet** clears it back to 0 (threshold falls back to 69).
+
+Recovery from a Wet morning happens through the validated rules alone:
+once the morning window ends, floor dry (< 55%), normal dry (≤ baseline),
+or a delta cancellation flips the status back to Dry as the dew
+evaporates. On humid days where moisture plateaus **above** the baseline,
+the status deliberately stays Wet — setting Dry manually both unblocks
+the day and recalibrates the baseline to the observed humid-climate
+level, so the system learns from you rather than guessing.
 
 ### Manual overrides
 
