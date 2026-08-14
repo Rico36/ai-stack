@@ -1208,7 +1208,9 @@ automation:
     action:
       # ── Grass Status thresholds — edit here only ──────────────────────────
       # Wet triggers (only these three):
-      #   Delta spike : m rose > 6 % above 30-min minimum AND status was Dry
+      #   Delta spike : m rose > 3.5 % above 30-min minimum AND status was Dry
+      #                 (3.5 catches brief sprinkles/sprinkler passes; observed
+      #                  sensor noise tops out around 1.5–2 % per 30 min)
       #   Morning dew : 4–10 AM AND m > 51 (unconditional — overrides baseline)
       #   High moisture: m > 79 AND m above the dry baseline
       # Dry triggers:
@@ -1239,7 +1241,7 @@ automation:
             {{ (as_timestamp(now()) - as_timestamp(t)) | int(0) if t not in ['unknown','unavailable',''] else 0 }}
           expired: "{{ is_state('input_boolean.goat_grass_status_override', 'on') and override_age > 18000 }}"
           morning: "{{ now().hour >= 4 and now().hour < 10 }}"
-          spike: "{{ states('input_select.goat_grass_status') == 'Dry' and (m - min_30) > 6 }}"
+          spike: "{{ states('input_select.goat_grass_status') == 'Dry' and (m - min_30) > 3.5 }}"
           dry_thresh: "{{ baseline if baseline > 0 else 69 }}"
           cancel: "{{ delta_active and m <= dry_thresh }}"
           floor_dry: "{{ m < 55 and not morning }}"
