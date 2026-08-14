@@ -81,7 +81,7 @@ matches wins:
 | P1 | Floor dry | moisture < 55% AND not morning (4–10 AM) | **Dry** — clears delta + override; baseline untouched |
 | P2 | Delta spike | status was Dry AND moisture rose > 3.5% above its 30-min minimum | **Wet** — sets delta flag, stores the 30-min minimum as the dry baseline; the only rule that overrides a manual override |
 | P3 | Manual override hold | override flag on (and not expired) | status held as-is |
-| P4 | Delta cancellation | delta flag on AND moisture ≤ dry baseline | **Dry** — clears delta flag, stores the settled value as the new baseline |
+| P4 | Delta cancellation | delta flag on AND moisture ≤ dry baseline **+ 1** | **Dry** — clears delta flag, stores the settled value as the new baseline |
 | P5 | Delta hold | delta flag on, moisture still above the baseline | held **Wet** |
 | P6 | Morning dew | 4–10 AM AND moisture > 51% | **Wet** — unconditional; morning and delta are the two rules that override the baseline |
 | P7 | High moisture | moisture > 79% AND above the dry baseline | **Wet** |

@@ -1215,7 +1215,7 @@ automation:
       #   High moisture: m > 79 AND m above the dry baseline
       # Dry triggers:
       #   Floor dry   : m < 55 AND not morning → always Dry, clears all flags
-      #   Delta cancel: delta_active AND m ≤ dry baseline → Dry, clear delta
+      #   Delta cancel: delta_active AND m ≤ dry baseline + 1 → Dry, clear delta
       #   Normal dry  : m ≤ dry baseline
       # Dry baseline (input_number.goat_moisture_baseline, fallback 69 when 0):
       #   set ONLY by manual Dry override (current m) and by delta scenarios
@@ -1243,7 +1243,13 @@ automation:
           morning: "{{ now().hour >= 4 and now().hour < 10 }}"
           spike: "{{ states('input_select.goat_grass_status') == 'Dry' and (m - min_30) > 3.5 }}"
           dry_thresh: "{{ baseline if baseline > 0 else 69 }}"
-          cancel: "{{ delta_active and m <= dry_thresh }}"
+          # +1 tolerance: the spike stores the 30-min MINIMUM as the baseline,
+          # so requiring an exact return would hang Wet whenever moisture
+          # settles slightly above its recent low. Cancel writes the settled
+          # value back as the new baseline, so drift is bounded and self-
+          # correcting. Only the cancel rule gets the tolerance — normal dry
+          # and high moisture still test the baseline exactly.
+          cancel: "{{ delta_active and m <= dry_thresh + 1 }}"
           floor_dry: "{{ m < 55 and not morning }}"
 
       # Clear expired override so rules below treat it as off
