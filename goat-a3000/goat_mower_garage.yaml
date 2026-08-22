@@ -7,6 +7,13 @@ input_boolean:
     name: GOAT Garage Managed Open
     icon: mdi:garage-open
 
+  # Gates garage failure alerts to one per session. Set when an alert is
+  # sent, cleared on any successful open/close and whenever a mowing
+  # session starts or ends.
+  goat_garage_alert_sent:
+    name: GOAT Garage Alert Sent
+    icon: mdi:bell-off
+
   goat_departure_window_active:
     name: GOAT Departure Window Active
     icon: mdi:garage-alert
@@ -163,10 +170,59 @@ script:
                 critical: "{{ 1 if critical | default(false) else 0 }}"
                 volume: "{{ 1.0 if critical | default(false) else 0.5 }}"
 
+  # Both garage scripts are advisory: they never command the mower, so a
+  # garage problem never stops it from mowing, returning, or docking.
+  # Alerts are gated by input_boolean.goat_garage_alert_sent so a flaky
+  # opener produces one notification per session, not one per attempt
+  # (the mower can bounce docked/returning several times in seconds).
   goat_open_garage:
     alias: GOAT - Open Garage
     mode: single
     sequence:
+      - choose:
+          # Already open — nothing to command, nothing to wait for. Also
+          # covers the case where the door was opened manually.
+          - conditions:
+              - condition: state
+                entity_id: cover.garage_door
+                state: "open"
+            sequence:
+              - service: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.goat_garage_managed_open
+              - service: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.goat_garage_alert_sent
+              - stop: "Garage already open"
+
+          # Opener offline (Ratgdo disconnected, Wi-Fi drop). We can neither
+          # command nor verify — the door may well already be open, so warn
+          # once and get out of the way instead of blocking for a minute.
+          # goat_garage_managed_open is deliberately left off: HA did not
+          # open this door, so it must not try to close it later.
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ states('cover.garage_door') in ['unavailable', 'unknown'] }}
+            sequence:
+              - if:
+                  - condition: state
+                    entity_id: input_boolean.goat_garage_alert_sent
+                    state: "off"
+                then:
+                  - service: input_boolean.turn_on
+                    target:
+                      entity_id: input_boolean.goat_garage_alert_sent
+                  - service: script.goat_notify
+                    data:
+                      title: "Garage opener unavailable"
+                      message: >
+                        Cannot reach the garage door opener. If the door is
+                        already open the mower will pass through normally;
+                        otherwise open it manually. Mowing continues either
+                        way. No further garage alerts this session.
+              - stop: "Opener unavailable — cannot command or verify"
+
       - service: cover.open_cover
         target:
           entity_id: cover.garage_door
@@ -184,20 +240,62 @@ script:
               - service: input_boolean.turn_on
                 target:
                   entity_id: input_boolean.goat_garage_managed_open
+              # Success clears the gate so a later, unrelated failure can
+              # still raise its own single alert
+              - service: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.goat_garage_alert_sent
         default:
-          - service: script.goat_notify
-            data:
-              title: "Garage failed to open"
-              message: "Garage door did not report open within 1 minute. Check garage before Mower moves."
-              critical: true
+          - if:
+              - condition: state
+                entity_id: input_boolean.goat_garage_alert_sent
+                state: "off"
+            then:
+              - service: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.goat_garage_alert_sent
+              - service: script.goat_notify
+                data:
+                  title: "Garage failed to open"
+                  message: >
+                    Garage door did not report open within 1 minute. Check the
+                    garage — the mower will continue its task regardless. No
+                    further garage alerts this session.
+                  critical: true
 
   goat_close_garage:
     alias: GOAT - Close Garage
     mode: single
     sequence:
+      # Only close what HA opened
       - condition: state
         entity_id: input_boolean.goat_garage_managed_open
         state: "on"
+
+      - choose:
+          # Opener offline — warn once (gated) and leave the managed flag on
+          # so the door is still known to be open.
+          - conditions:
+              - condition: template
+                value_template: >
+                  {{ states('cover.garage_door') in ['unavailable', 'unknown'] }}
+            sequence:
+              - if:
+                  - condition: state
+                    entity_id: input_boolean.goat_garage_alert_sent
+                    state: "off"
+                then:
+                  - service: input_boolean.turn_on
+                    target:
+                      entity_id: input_boolean.goat_garage_alert_sent
+                  - service: script.goat_notify
+                    data:
+                      title: "Garage opener unavailable"
+                      message: >
+                        Cannot reach the garage door opener to close the door.
+                        Please check it manually. No further garage alerts
+                        this session.
+              - stop: "Opener unavailable — cannot command or verify"
 
       - service: cover.close_cover
         target:
@@ -215,13 +313,25 @@ script:
             sequence:
               - service: input_boolean.turn_off
                 target:
-                  entity_id: input_boolean.goat_garage_managed_open
+                  entity_id:
+                    - input_boolean.goat_garage_managed_open
+                    - input_boolean.goat_garage_alert_sent
         default:
-          - service: script.goat_notify
-            data:
-              title: "Garage failed to close"
-              message: "Garage door did not report closed within 1 minute. Please check it."
-              critical: true
+          - if:
+              - condition: state
+                entity_id: input_boolean.goat_garage_alert_sent
+                state: "off"
+            then:
+              - service: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.goat_garage_alert_sent
+              - service: script.goat_notify
+                data:
+                  title: "Garage failed to close"
+                  message: >
+                    Garage door did not report closed within 1 minute. Please
+                    check it. No further garage alerts this session.
+                  critical: true
 
   goat_try_dock:
     alias: GOAT - Try Dock
@@ -1617,3 +1727,18 @@ automation:
                   The garage door will open automatically for the mower but please
                   make sure the black sensor cover is off. Also, open the backyard gate.
                 </prosody>
+
+  - alias: GOAT - Reset Garage Alert Gate
+    id: goat_reset_garage_alert_gate
+    description: >
+      Clears the once-per-session garage alert gate whenever a mowing
+      session starts or ends, so each session can raise at most one garage
+      notification and a stuck gate never silences the next session.
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: input_boolean.goat_mowing_session_active
+    action:
+      - service: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.goat_garage_alert_sent
