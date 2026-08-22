@@ -538,13 +538,17 @@ script:
       - service: persistent_notification.create
         data:
           title: "GOAT Weather Check"
-          message: >
-            Grass Status: {{ grass_status }} → {{ grass_gate }}
-            Soil moisture: {{ soil_moisture }}%
-            Mower error: {{ mower_error }} (block={{ mower_error != 0 }})
-            Forecast block: {{ forecast_block }}
-            Slots: {{ forecast_slots }}
-            Result: {% if grass_status == 'Wet' %}CANCEL — Grass Status Wet{% elif grass_status != 'Dry' and soil_moisture >= 55 %}CANCEL — wet grass ({{ soil_moisture | round(1) }}%){% elif mower_error != 0 %}CANCEL — mower error{% elif forecast_block == 'True' %}CANCEL — forecast rain{% else %}GO{% endif %}
+          # Literal block + Markdown list: notifications render as Markdown,
+          # which collapses single newlines, so each line needs to be a list
+          # item to appear on its own row.
+          message: |
+            - **Grass Status:** {{ grass_status }} → {{ grass_gate }}
+            - **Soil moisture:** {{ soil_moisture }}%
+            - **Mower error:** {{ mower_error }} (block={{ mower_error != 0 }})
+            - **Forecast block:** {{ forecast_block }}
+            - **Slots:** {{ forecast_slots }}
+
+            **Result: {% if grass_status == 'Wet' %}CANCEL — Grass Status Wet{% elif grass_status != 'Dry' and soil_moisture >= 55 %}CANCEL — wet grass ({{ soil_moisture | round(1) }}%){% elif mower_error != 0 %}CANCEL — mower error{% elif forecast_block == 'True' %}CANCEL — forecast rain{% else %}GO{% endif %}**
 
   goat_start_mowing_now:
     alias: GOAT - Start Mowing Now
