@@ -12,7 +12,7 @@ that replaces the Ecovacs app as the scheduler.
 
 | Component | Version / detail |
 |---|---|
-| Mower | GOAT A3000 LiDAR, model `cr0e4u`, firmware 1.13.31 |
+| Mower | GOAT A3000 LiDAR, class `cr0e4u`, fw 1.13.31. Also running a **GOAT A3000 LiDAR Pro**, class `51rcxt` — see "The Pro" below |
 | Home Assistant | Container install (Docker), container name `home-assistant` |
 | Host | Raspberry Pi, Raspberry Pi OS (64-bit) |
 | Ecovacs integration library | deebot-client **18.3.0** (site-packages, classic setup). Since July 2026 the active copy is the community custom integration's vendored deebot-client, based on **18.4.0** (email device verification / error 1013 fix) |
@@ -114,26 +114,19 @@ sudo find /home/admin/homeassistant/custom_components/ecovacs/vendor -name '*.py
 docker restart home-assistant
 ```
 
-### Zone IDs (cr0e4u)
+### Zone IDs
 
-Zone IDs are internal library IDs, not the area numbers shown in the Ecovacs
-app. Find yours by enabling debug logging for the mower in HA, starting a
-zone mow from the app, then searching the logs for:
+Zone IDs are internal library IDs, **not** the area numbers shown in the
+Ecovacs app. Find yours by enabling debug logging for the mower, starting an
+area mow from the app, then searching the logs for:
 
 ```
-onCleanInfo ... "type":"spotArea","value":"3,2,6,4,7,5"
+onCleanInfo ... "type":"spotArea","value":"..."
 ```
 
-Confirmed IDs on this hardware:
-
-| Zone ID | Area |
-|---|---|
-| 2 | Front Street |
-| 3 | Front |
-| 4 | Left Side Street |
-| 5 | Backyard Side |
-| 6 | Left Side |
-| 7 | Backyard |
+The values appear in the order the app lists the areas, so mowing one area
+alone reveals that area's internal ID. Put them, comma-separated and in mow
+order, into `input_text.goat_zone_ids`.
 
 ---
 
@@ -146,27 +139,55 @@ the sole scheduler — delete all Ecovacs app schedules after deploying.
 ### What it does
 
 - **Scheduled mowing**: fires at a configurable daily time on selected days,
-  checks weather, opens the garage, and commands `lawn_mower.start_mowing`
-- **Manual mowing**: "Start Mowing Now" button on the dashboard runs the
-  same weather check and mow flow
-- **Makeup mowing**: if a scheduled mow is weather-cancelled, retries
-  automatically every hour 11am–7pm on non-scheduled days until conditions clear
-- **Garage management**: opens before mowing, closes after departure; opens
-  again when mower returns; closes when docked
-- **Weather protection**: blocks mowing if soil moisture ≥ 55% (wet grass /
-  dew / rain) or if PirateWeather forecasts ≥ 40% precipitation probability
-  in the next 95 minutes
-- **Error handling**: critical iOS alert + dock command on mower error or
-  pause > 5 minutes; fallback alert if mower is still out after 2 hours
+  runs the full pre-flight check, and commands `lawn_mower.start_mowing`
+- **Manual mowing**: "Start Mowing Now" button runs the same checks
+- **Makeup mowing**: a weather-cancelled mow retries hourly 11am–7pm on
+  non-scheduled days until conditions clear
+- **Grass Status**: an eight-rule priority chain over soil moisture that
+  distinguishes dew, rain spikes and genuine dryness, with a manual override
+  that also calibrates the dry threshold. This is the heart of the package —
+  see `HA/readme.md` in the companion repo for the full rule table
+- **Rain forecast**: blocks when PirateWeather shows ≥ 40% precipitation
+  probability, or a rainy/pouring/lightning condition, in the next 95 minutes
+- **Departure handling**: any start HA did not initiate — app, physical
+  button, or the mower resuming after a mid-run recharge — is paused
+  immediately, weather-checked, then either docked or resumed
+- **Mid-run recharge**: distinguishes a charging break from a finished run
+  using the mower's `workComplete` signal, so the session is not closed out
+  early (battery level cannot tell them apart — runs finish as low as 17%)
+- **Error handling**: critical push + dock on mower error or a pause over
+  5 minutes; fallback alert if still out after 2 hours
+
+### Optional: a physical barrier before mowing
+
+This package was originally built around a garage door the mower had to pass
+through. That is gone — the mower now bases outdoors — but the pattern
+survives for anyone whose mower must cross a gate to reach part of the lawn:
+
+- Two pre-mow reminders (T−17 and T−5) check a contact sensor and only ask
+  for the barrier when it is actually shut
+- They stay quiet when the scheduled zones are all reachable without it
+  (`input_text.goat_gate_free_zones`)
+- T−5 escalates to a critical push if it is still closed
+
+If you have no such barrier, leave `binary_sensor.backyard_gate_contact`
+undefined and the reminders simply always mention it — or delete the two
+reminder automations.
 
 ### External dependencies
 
-| Dependency | Purpose |
-|---|---|
-| PirateWeather integration | 95-minute rain forecast (`weather.pirateweather`) |
-| THIRDREALITY Soil Moisture Sensor Gen2 (Zigbee) | Wet grass detection (`sensor.front_rain_sensor_soil_moisture`) |
-| iOS Companion App | Push notifications via `notify.house_phones` |
-| `cover.garage_door` | Garage door entity (any cover integration) |
+| Dependency | Purpose | Required? |
+|---|---|---|
+| PirateWeather integration | 95-minute rain forecast (`weather.pirateweather`) | yes |
+| THIRDREALITY Soil Moisture Sensor Gen2 (Zigbee) | Grass Status (`sensor.front_rain_sensor_soil_moisture`) | yes |
+| iOS Companion App | Push notifications via `notify.house_phones` | yes |
+| Alexa Media Player | Spoken pre-mow reminders via `notify.house_alexas` | reminders only |
+| Gate/door contact sensor | `binary_sensor.backyard_gate_contact` | reminders only |
+| Rain accumulation sensor | `sensor.goat_rain_last_3_hours` | reminders only |
+
+Any soil moisture sensor works; only the entity ID matters. Every mower
+reference is `lawn_mower.goat_a3000_lidar` plus its `_error` and `_battery`
+sensors — rename your entities to match and no YAML edits are needed.
 
 ### Configuration — after deploying the package
 
@@ -174,8 +195,20 @@ the sole scheduler — delete all Ecovacs app schedules after deploying.
 2. **Set your start time** — `Scheduled Start Time` input on the dashboard
 3. **Set your mow mode** — "Areas" or "Full Map (Auto)"
 4. **Set your zone IDs** — comma-separated (see Zone IDs above)
-5. **Enable automation** — `GOAT Automation Enabled` toggle
-6. **Delete all Ecovacs app schedules** — HA is now the scheduler
+5. **Set gate-free zones** — IDs reachable without opening the gate; leave
+   empty if you have no gate
+6. **Set the dry baseline** — set Grass Status to `Dry` manually on a day the
+   lawn genuinely is; that records the threshold everything else measures
+   against
+7. **Enable automation** — `GOAT Automation Enabled` toggle
+8. **Delete all Ecovacs app schedules** — HA is now the scheduler
+
+### Tuning for your yard
+
+Two timers assume a roughly 95-minute run and are the first things to adjust:
+`start + 95 min` opens the expected-return window, and `start + 120 min`
+raises a critical "not docked" alert. Time two or three full runs and set them
+from real data, especially on a mower with a different battery.
 
 ### Dashboard
 
@@ -191,6 +224,24 @@ Layout:
 3. Entities card ("Mowing Run") — manual start + session status
 
 ---
+
+## The Pro (class `51rcxt`)
+
+The GOAT A3000 LiDAR **Pro** reports class `51rcxt` (model
+`GOAT_INT_A2600_LIDAR_PLUS_NA`, UILogicId `goatl_ww_h_goat2plus`) — a
+different platform from the A3000, despite the shared name. deebot-client
+18.4.0 already ships `hardware/51rcxt.py`, so the device enumerates with no
+new definition needed.
+
+That stock profile does wire `CleanV2`, `CleanAreaV2` and `GetCleanInfoV2` —
+the same V2 pattern that fails on `cr0e4u`. Whether the Pro's firmware
+answers them is hardware-specific: test before assuming it needs the patches.
+If it does, the fix is three lines (swap in `GetCleanInfo` and
+`CleanMowerArea`); the two profiles are otherwise byte-identical.
+
+The Pro also carries a 7500 mAh battery against the A3000's 5000 mAh, so
+mid-run recharges may stop happening entirely and the 95/120-minute timers
+will need retuning.
 
 ## Findings reference
 
