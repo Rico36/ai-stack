@@ -268,6 +268,18 @@ class CleanMowerEndAndCharge(Charge):
         await CleanMower(CleanAction.STOP).execute(
             authenticator, device_info, event_bus
         )
+
+        # An HA-initiated dock IS the end of the run, but the mower only
+        # emits workComplete when a job finishes naturally — so write the
+        # marker ourselves. Without this, GOAT - Session End On Dock finds
+        # no marker, misreads the dock as a mid-run recharge, and leaves the
+        # session open until the 3-hour cleanup.
+        try:
+            with open("/tmp/goat_work_complete", "w") as f:
+                f.write("1")
+        except OSError:
+            pass
+
         # Give the mower a moment to register the stop before sending it home
         await asyncio.sleep(2)
         return await super()._execute(authenticator, device_info, event_bus)
