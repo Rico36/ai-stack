@@ -37,11 +37,21 @@ Files prefixed `ecovacs-repo-` are **staging copies** destined for the separate
 - Also on dashboard: `sensor.lawn_front_soil_moisture`, `sensor.lawn_back_soil_moisture`
 - External dependency referenced by reminders: `sensor.goat_rain_last_3_hours`
 
-### Zone IDs — cr0e4u (OLD mower, superseded)
+### Zone IDs — Pro (`51rcxt`), confirmed Sept 2026
 
-`3,2,6,4,7,5` = Front, Front Street, Left Side, Left Side Street, Backyard,
-Backyard Side. **The Pro will have different IDs** — re-discover via debug log
-(`onCleanInfo … "type":"spotArea","value":"…"`).
+| App area | Internal ID |
+|---|---|
+| Front | 3 |
+| Side | 2 |
+| Backyard | **1** |
+
+Discovered by mowing Front → Side → Backyard from the app and reading
+`onCleanInfo … "type":"spotArea","value":"3,2,1"`. **The value list is mow
+order**, not app-area order — verified deliberately.
+
+`goat_gate_free_zones` = `1` (Backyard is the mower's own side of the gate).
+
+Old cr0e4u mapping, superseded: `3,2,6,4,7,5` over six areas.
 
 ---
 
@@ -169,9 +179,14 @@ escalates to a critical phone alert if it's still shut.
   entity IDs to the Pro after removing the A3000), new zone IDs, and retuning
   the 95-min / 120-min windows (the Pro has a 7500 mAh battery vs 5000, so
   runtime differs and mid-run recharges may stop happening).
-- **`51rcxt` profile**: upstream ships one, so the device enumerates. Its stock
-  wiring uses `CleanV2`/`CleanAreaV2`/`GetCleanInfoV2` — the pattern that fails
-  on cr0e4u. Test before deploying `ecovacs-repo-patches-51rcxt.py`.
+- **`51rcxt` profile**: upstream ships one, so the device enumerates, but its
+  stock `CleanV2` wiring **is confirmed broken on the Pro** — HA's pause sends
+  `content: {"type": ""}` and the mower does not reply at all, while the app's
+  pause with `{"type": "spotArea"}` is accepted. Deploy
+  `ecovacs-repo-patches-51rcxt.py`. Note `lawn_mower.dock` always worked: it
+  maps to the `charge` command, a different endpoint from `clean`.
+  Still unverified: whether `GetCleanInfoV2` answers on the Pro (it timed out
+  with errno 500 on cr0e4u), and whether HA-initiated *start* works.
 - **Undecided**: should a closed gate at dispatch time cancel the mow (with
   makeup pending) or proceed and mow only the backyard?
 - **Dashboard** still has garage rows and a `mdi:garage-alert` icon.
