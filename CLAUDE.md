@@ -1,40 +1,85 @@
-# Project Memory — ai-stack / GOAT A3000 HA Integration
+# Project Memory — ai-stack / GOAT HA Integration
 
 ## Active work
 
-All Ecovacs GOAT A3000 LiDAR mower work lives in `goat-a3000/`.
+All Ecovacs GOAT mower work lives in `goat-a3000/`.
+
+Files prefixed `ecovacs-repo-` are **staging copies** destined for the separate
+`Rico36/Ecovacs-Goat-A3000-Mower` repo. GitHub MCP access here is scoped to
+`rico36/ai-stack` only, so those files are pushed to this branch and then
+`curl`ed onto the Pi and committed to the other repo from there.
 
 ### Files
 
 | File | Purpose |
 |---|---|
 | `goat-a3000/goat_mower_garage.yaml` | HA package — all helpers, scripts, automations |
-| `goat-a3000/dashboard.yaml` | Settled HA dashboard card YAML (reference copy) |
-| `goat-a3000/validate-patches.sh` | Verifies deebot-client patches are active in container |
+| `goat-a3000/dashboard.yaml` | HA dashboard card YAML (reference copy) |
 | `goat-a3000/README.md` | deebot-client patch docs |
+| `goat-a3000/validate-patches.sh` | Verifies deebot-client patches are active in container |
+| `goat-a3000/patch-rs-imports.py` | aarch64 fallbacks for the Rust extension (9 import sites) |
+| `goat-a3000/ecovacs-repo-README.md` | Staged root README for the Ecovacs repo |
+| `goat-a3000/ecovacs-repo-HA-readme.md` | Staged `HA/readme.md` for the Ecovacs repo |
+| `goat-a3000/ecovacs-repo-patches-clean.py` | Staged patched `clean.py` |
+| `goat-a3000/ecovacs-repo-patches-51rcxt.py` | Standby Pro hardware profile — **not deployed** |
 
 ### Hardware
 
-- Mower: GOAT A3000 LiDAR, model `cr0e4u`, firmware 1.13.31
-- HA: Docker container `home-assistant` on Raspberry Pi
-- deebot-client: 18.3.0
-- Soil moisture sensor: `sensor.front_rain_sensor_soil_moisture` (front yard, THIRDREALITY Gen2 Zigbee)
-- Additional moisture sensors on dashboard: `sensor.lawn_front_soil_moisture`, `sensor.lawn_back_soil_moisture`
+- Mower: **GOAT A3000 LiDAR Pro**, class `51rcxt`
+  (model `GOAT_INT_A2600_LIDAR_PLUS_NA`, UILogicId `goatl_ww_h_goat2plus`)
+  — replacing the GOAT A3000 LiDAR, class `cr0e4u`, fw 1.13.31
+- **No garage.** The Pro bases in the backyard in its own weather housing.
+- Backyard gate: `binary_sensor.backyard_gate_contact` — HA can **read but not
+  control** it. `off` = closed (assumed; verify). It is the physical
+  prerequisite for reaching the front zones.
+- HA: Docker container `home-assistant` on Raspberry Pi (aarch64)
+- Soil moisture: `sensor.front_rain_sensor_soil_moisture` (THIRDREALITY Gen2 Zigbee)
+- Also on dashboard: `sensor.lawn_front_soil_moisture`, `sensor.lawn_back_soil_moisture`
+- External dependency referenced by reminders: `sensor.goat_rain_last_3_hours`
 
-### Zone IDs (cr0e4u)
+### Zone IDs — cr0e4u (OLD mower, superseded)
 
-Confirmed via debug log (`onCleanInfo` → `"type":"spotArea","value":"3,2,6,4,7,5"`):
+`3,2,6,4,7,5` = Front, Front Street, Left Side, Left Side Street, Backyard,
+Backyard Side. **The Pro will have different IDs** — re-discover via debug log
+(`onCleanInfo … "type":"spotArea","value":"…"`).
 
-| ID | Area |
+---
+
+## Ecovacs integration — the July 2026 situation
+
+Stock integration broke: Ecovacs added server-side email device verification
+(error 1013). Running the **community custom integration** at
+`/config/custom_components/ecovacs/` (= `/home/admin/homeassistant/…`), which
+vendors its own deebot_client (18.4.0 base, manifest `2026.7.2-email-device-auth.1`).
+
+Consequences to remember:
+
+- Patches now live in `custom_components/ecovacs/vendor/deebot_client/`,
+  **not** site-packages. They survive container updates (mounted volume).
+- The bundled Rust extension is x86_64-only → all 9 `deebot_client.rs` import
+  sites are wrapped in try/except with pure-Python stubs. **Map rendering is
+  off** (`generate_svg` returns None); everything else works.
+- **Do not update HA core casually** — the custom integration is pinned to
+  2026.7.2 internals and the mower depends on it.
+- PirateWeather is **pinned to v1.9.0**; v1.9.2 needs `UnitOfDensity`, absent
+  from this HA core. Ignore the HACS update badge.
+
+### Live patches in the vendored library
+
+| File | Patch |
 |---|---|
-| 2 | Front Street |
-| 3 | Front |
-| 4 | Left Side Street |
-| 5 | Backyard Side |
-| 6 | Left Side |
-| 7 | Backyard |
+| `hardware/cr0e4u.py` | `GetCleanInfo` (not V2), clean action → `CleanMowerArea` |
+| `commands/json/clean.py` | `CleanMower`/`CleanMowerArea`; task-type cache for RESUME; `workComplete` marker |
+| `messages/json/__init__.py` | routes `onScheduleTaskInfo`; `goCharging` → RETURNING |
 
-Default zone order in `input_text.goat_zone_ids`: `3,2,6,4,7,5`
+Two `clean.py` findings worth keeping:
+- **RESUME must echo the running task's type.** Resuming a `spotArea` task with
+  `type: auto` returns `code 0 "ok"` and is silently ignored. The task type is
+  cached from `getCleanInfo`/`onCleanInfo`.
+- **`workComplete` is the only reliable end-of-run signal.** Battery level
+  cannot distinguish an end-of-run dock from a mid-run recharge — runs have
+  completed at 17%. The patch writes `/tmp/goat_work_complete`; HA reads its
+  freshness via `shell_command.goat_check_work_complete` (< 20 min = complete).
 
 ---
 
@@ -42,95 +87,92 @@ Default zone order in `input_text.goat_zone_ids`: `3,2,6,4,7,5`
 
 ### Key design decisions
 
-- **Scheduling**: HA is the sole scheduler. All Ecovacs app schedules deleted.
-  `GOAT - Scheduled Start Gatekeeper` fires at `input_datetime.goat_mowing_start_time`
-  and checks `input_boolean.goat_schedule_{mon..sun}` for the current day.
+- **Scheduling**: HA is the sole scheduler; all Ecovacs app schedules deleted.
+- **Three mow paths** — scheduled (`goat_mowing_start`), manual
+  (`goat_start_mowing_now`), makeup (`GOAT - Makeup Day Check`) — all read
+  `goat_mow_mode` + `goat_zone_ids`, write the zone file, call `start_mowing`.
+- **Rain forecast**: PirateWeather 95-min window; blocks at
+  `precipitation_probability >= 40%` or rainy/pouring/lightning.
+- **Mow gate**: Grass Status `Wet` blocks; `Dry` passes; `Uncertain` falls back
+  to raw moisture ≥ 55%.
+- **Departure Handler** handles *every* non-HA departure (app start, physical
+  button, recharge self-resume) with one flow: **pause first, decide second** —
+  halt the mower immediately, then weather-check, then dock or resume.
+  `goat_departure_window_active` is what excludes HA-initiated starts.
+- **Critical notifications**: errors, paused-too-long, not-docked-after-2h, and
+  a gate still closed at T−5.
 
-- **Mow mode**: Both scheduled (`goat_mowing_start`) and manual (`goat_start_mowing_now`)
-  and makeup (`GOAT - Makeup Day Check`) read `input_select.goat_mow_mode` and
-  `input_text.goat_zone_ids`. All three paths write the zone file and call
-  `lawn_mower.start_mowing` directly.
+### Grass Status — priority chain (`GOAT - Update Grass Status`)
 
-- **Wet grass detection**: `sensor.front_rain_sensor_soil_moisture >= 55%` blocks mowing.
-  Physical sensor catches rain, dew, and drizzle. Threshold: 55%.
+| # | Rule | Condition | Result |
+|---|---|---|---|
+| P1 | Floor dry | m < 55 AND not morning | Dry, clears flags |
+| P2 | Delta spike | Dry AND m − 30-min-min > **3** | Wet; baseline ← 30-min min |
+| P3 | Override hold | override on, not expired | hold |
+| P4 | Delta cancel | delta on AND m ≤ baseline **+ 1** | Dry; baseline ← m |
+| P5 | Delta hold | delta on | hold Wet |
+| P6 | Morning dew | 4–10 AM AND m > 51 | Wet (unconditional) |
+| P7 | High moisture | m > 79 AND m > baseline | Wet |
+| P8 | Normal dry | m ≤ baseline (fallback 69) | Dry |
 
-- **Rain forecast**: PirateWeather 95-minute window. Blocks if `precipitation_probability >= 40%`
-  or condition in `['rainy','pouring','lightning','lightning-rainy']`.
+**Dry baseline** (`input_number.goat_moisture_baseline`) is set **only** by
+manual Dry (current m) and delta scenarios; cleared by manual Wet. Never set
+from an unvalidated reading, never reset on a schedule. A 10am snapshot rule
+was tried and removed — it declared Dry prematurely and ratcheted the baseline
+upward every wet morning.
 
-- **Makeup mowing**: When a scheduled mow is weather-cancelled, `goat_makeup_pending` turns on.
-  `GOAT - Makeup Day Check` retries hourly 11am–7pm on non-scheduled days. Sends one
-  notification at 11am if still blocked; silent retries each hour after. Clears on any
-  successful dock.
-
-- **Critical notifications**: Only errors and "not docked after 2 hours" use `critical: true`.
-  All other notifications are non-critical.
-
-- **Manual Start Detected**: Fires on every `mowing` state transition where
-  `goat_mowing_session_active = off`. Checks weather; if rain forecast → docks and notifies.
-  If clear → opens garage, sets session active (authorizes the run).
+Manual override locks status for 5 hours (`GOAT - Expire Manual Override`);
+only a delta spike can override it.
 
 ### Entities
 
-**input_boolean**
-- `goat_automation_enabled` — master on/off
-- `goat_garage_managed_open` — tracks whether HA opened the garage
-- `goat_departure_window_active` — garage open, mower hasn't left yet
-- `goat_mowing_session_active` — HA-authorized mowing session in progress
-- `goat_schedule_mon` … `goat_schedule_sun` — scheduled mowing days
-- `goat_makeup_pending` — a scheduled mow was cancelled; makeup needed
+**input_boolean** — `goat_automation_enabled`, `goat_departure_window_active`
+(HA-initiated start in flight), `goat_mowing_session_active`,
+`goat_schedule_mon…sun`, `goat_makeup_pending`, `goat_grass_status_override`,
+`goat_delta_rule_active`
 
-**input_datetime**
-- `goat_mowing_start_time` — daily scheduled start time (time only)
-- `goat_mowing_session_started_at` — timestamp of session start (used for +95min return window)
-- `goat_last_mowing_decision` — timestamp of last go/cancel decision
+**input_number** — `goat_moisture_baseline`
 
-**input_text**
-- `goat_last_mowing_status` — "Normal" | "Manual" | "Makeup" | "Returning" | "Cancelled due to weather"
-- `goat_zone_ids` — comma-separated zone IDs, default `3,2,6,4,7,5`
+**input_select** — `goat_mow_mode`, `goat_grass_status` (Uncertain/Dry/Wet)
 
-**input_select**
-- `goat_mow_mode` — "Areas (e.g., 3,2,6,4,7,5)" | "Full Map (Auto)"
+**input_datetime** — `goat_mowing_start_time`, `goat_mowing_session_started_at`,
+`goat_last_mowing_decision`, `goat_override_started_at`
 
-**shell_command**
-- `goat_write_zones` — writes `input_text.goat_zone_ids` to `/tmp/goat_zones` inside container
+**input_text** — `goat_last_mowing_status`, `goat_zone_ids`
+
+**sensor** — `soil_moisture_30min_min` (statistics, `value_min`, 30 min)
+
+**shell_command** — `goat_write_zones`, `goat_check_work_complete`
 
 ### Scripts
 
-| Script | Purpose |
-|---|---|
-| `goat_notify` | Send iOS push; `critical: true` for DND-bypassing alerts |
-| `goat_open_garage` | Open + wait for confirmation; sets `goat_garage_managed_open` |
-| `goat_close_garage` | Close only if `goat_garage_managed_open = on` |
-| `goat_try_dock` | Send dock command twice (20s apart) |
-| `goat_mowing_start` | Scheduled mow: weather check → zone write → open garage → start_mowing |
-| `goat_start_mowing_now` | Manual mow: same flow, explicit `lawn_mower.start_mowing` |
-| `goat_test_weather_check` | Debug: runs forecast + soil moisture check, posts persistent notification |
+`goat_notify`, `goat_try_dock` (dock twice, 20s apart), `goat_mowing_start`,
+`goat_test_weather_check`, `goat_start_mowing_now`
 
-### Automations
+### Automations (15)
 
-| Automation | Trigger | Purpose |
-|---|---|---|
-| GOAT - Scheduled Start Gatekeeper | Time matches `goat_mowing_start_time` | Calls `goat_mowing_start` on scheduled days |
-| GOAT - Makeup Day Check | Hourly 11am–7pm | Starts makeup mow when conditions clear on non-scheduled days |
-| GOAT - Manual Start Detected | Mower → mowing (session_active = off) | Weather check; dock if rain, authorize if clear |
-| GOAT - Close Garage When Mowing Starts | Mower → mowing (departure_window = on) | Close garage 1 min after departure |
-| GOAT - Open Garage When Returning | Mower → returning (session_active = on) | Open garage for return |
-| GOAT - Close Garage When Docked | Mower → docked (session_active = on) | Close garage, clear session + makeup flags |
-| GOAT - Paused Too Long Return To Dock | Paused > 5 min (session_active = on) | Critical alert + dock |
-| GOAT - Error After Mowing Started | Error sensor ≠ 0 (session_active = on) | Critical alert + open garage + dock |
-| GOAT - Open Garage For Expected Return | start_time + 95 min | Preemptive garage open (backup for returning signal) |
-| GOAT - Not Docked Fallback Alert | start_time + 120 min (not docked) | Critical alert if mower still out after 2 hours |
+Scheduled Start Gatekeeper · Departure Handler · Paused Too Long Return To
+Dock · Mower Returning · Clear Departure Window · Error After Mowing Started ·
+Session End On Dock · Session Cleanup After Long Charge (3h) · Not Docked
+Fallback Alert (+120 min) · Makeup Day Check · Update Grass Status · Lock Grass
+Status On Manual Override · Expire Manual Override · Mowing Day Reminder
+(T−17) · Pre-Start Reminder (T−5)
+
+Both reminders are gate-aware: T−17 only asks for the gate if it's closed; T−5
+escalates to a critical phone alert if it's still shut.
 
 ---
 
-## Dashboard — settled layout (Jun 2026)
+## Open items
 
-Three cards in a vertical-stack:
-
-1. **Entities card** — GOAT status + Scheduled Mowing (start time, mow mode, zone IDs)
-2. **7-column button grid** (`custom:button-card`) — Mon–Sun day selectors, green=on/grey=off
-3. **Entities card** titled "Mowing Run" — Manual Mowing (Start Now button) + Session Status rows
-
-Full card YAML in `goat-a3000/dashboard.yaml`.
-
-HACS cards required: `custom:button-card`, `custom:template-entity-row`
+- **Pro cutover**: entity renaming (38 refs — easiest is to reassign the old
+  entity IDs to the Pro after removing the A3000), new zone IDs, and retuning
+  the 95-min / 120-min windows (the Pro has a 7500 mAh battery vs 5000, so
+  runtime differs and mid-run recharges may stop happening).
+- **`51rcxt` profile**: upstream ships one, so the device enumerates. Its stock
+  wiring uses `CleanV2`/`CleanAreaV2`/`GetCleanInfoV2` — the pattern that fails
+  on cr0e4u. Test before deploying `ecovacs-repo-patches-51rcxt.py`.
+- **Undecided**: should a closed gate at dispatch time cancel the mow (with
+  makeup pending) or proceed and mow only the backyard?
+- **Dashboard** still has garage rows and a `mdi:garage-alert` icon.
+- `validate-patches.sh` hardcodes `cr0e4u.py` and site-packages paths.
