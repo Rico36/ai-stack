@@ -106,13 +106,28 @@ input_text:
     max: 255
 
   goat_zone_ids:
-    # This are my zone areas defined in the Ecovacs APP  Area Mowing page.
-    # Internally the library uses zone IDs and not the actual zone area numbers shown in the Ecovac app.
-    # To find your zone IDs, enable debug log for the mower in HA, run the mower using areas from the app and
-    # look in the logs for this line:  onCleanInfo ... "type": "spotArea", "value": "3,2,6,4,7,5"
-    # Where the first number "3" in this example, is Area 1, "2" is Area 2, "6" is Area 3, etc.
-    # These numbers can/will be different in your own App environment.
+    # Comma-separated INTERNAL zone IDs, in mow order. These are NOT the area
+    # numbers shown in the Ecovacs app — the library uses its own IDs.
+    #
+    # To find yours: enable debug logging for the mower, start an area mow
+    # from the app, then look for
+    #   onCleanInfo ... "type":"spotArea","value":"..."
+    # The values appear in the order the app lists the areas, so mowing Area 1
+    # alone reveals Area 1's internal ID, and so on.
+    #
+    # Current app areas: Area1=Backyard, Area2=Side, Area3=Front.
+    # IDs pending re-discovery on the Pro (51rcxt) — the old cr0e4u mapping
+    # (3,2,6,4,7,5 over six areas) no longer applies.
     name: GOAT Zone IDs
+    max: 30
+
+  goat_gate_free_zones:
+    # Internal zone IDs the mower can reach WITHOUT the backyard gate — i.e.
+    # the Backyard area. Used by the two pre-mow reminders: if every zone in
+    # goat_zone_ids is listed here, a closed gate is irrelevant and they stay
+    # quiet about it. Empty = always warn (safe default). Full Map (Auto)
+    # always needs the gate.
+    name: GOAT Gate-Free Zone IDs
     max: 30
 
 sensor:
@@ -127,8 +142,7 @@ sensor:
 shell_command:
   # Writes selected zone IDs to a temp file inside the container.
   # CleanMowerArea reads this file once when start_mowing is called.
-  # Zone IDs: 2=Front Street, 3=Front, 4=Left Side Street,
-  #           5=Backyard Side, 6=Left Side, 7=Backyard
+  # See input_text.goat_zone_ids for how to discover the IDs.
   goat_write_zones: "python3 -c \"open('/tmp/goat_zones', 'w').write('{{ states(\"input_text.goat_zone_ids\") }}')\""
   # Prints 1 if the patched deebot_client wrote the workComplete marker
   # within the last 20 minutes (run genuinely finished), else 0. Used by
@@ -1396,10 +1410,14 @@ automation:
                 <audio src="soundbank://soundlibrary/home/amzn_sfx_doorbell_chime_01"/>
                 <break time="300ms"/>
                 <prosody volume="loud" rate="85%">
+                  {% set free = states('input_text.goat_gate_free_zones').split(',') | map('trim') | reject('eq','') | list %}
+                  {% set want = states('input_text.goat_zone_ids').split(',') | map('trim') | reject('eq','') | list %}
+                  {% set areas = states('input_select.goat_mow_mode').startswith('Areas') %}
+                  {% set gate_needed = not (areas and want | count > 0 and want | reject('in', free) | list | count == 0) %}
                   Attention. Today is mowing day.
-                  {% if is_state('binary_sensor.backyard_gate_contact', 'off') %}
+                  {% if gate_needed and is_state('binary_sensor.backyard_gate_contact', 'off') %}
                     Please open the backyard gate so the mower can reach the
-                    front lawn.
+                    rest of the lawn.
                   {% endif %}
                   Please clear the yard of hoses, toys and furniture, and make
                   sure the sensor cover is off.
@@ -1496,28 +1514,40 @@ automation:
                 <audio src="soundbank://soundlibrary/home/amzn_sfx_doorbell_chime_01"/>
                 <break time="300ms"/>
                 <prosody volume="loud" rate="85%">
+                  {% set free = states('input_text.goat_gate_free_zones').split(',') | map('trim') | reject('eq','') | list %}
+                  {% set want = states('input_text.goat_zone_ids').split(',') | map('trim') | reject('eq','') | list %}
+                  {% set areas = states('input_select.goat_mow_mode').startswith('Areas') %}
+                  {% set gate_needed = not (areas and want | count > 0 and want | reject('in', free) | list | count == 0) %}
                   Attention. The robot mower starts in 5 minutes.
-                  {% if is_state('binary_sensor.backyard_gate_contact', 'off') %}
-                    The backyard gate is still closed. Open it now or the front
-                    lawn will be skipped.
+                  {% if gate_needed and is_state('binary_sensor.backyard_gate_contact', 'off') %}
+                    The backyard gate is still closed. Open it now or part of
+                    the lawn will be skipped.
                   {% else %}
-                    The backyard gate is open. Please make sure the black sensor
-                    cover is off.
+                    Please make sure the black sensor cover is off.
                   {% endif %}
                 </prosody>
 
-          # Escalate: five minutes out, a shut gate needs a person, not a speaker
+          # Escalate: five minutes out, a shut gate needs a person, not a
+          # speaker — but only when this run actually leaves the backyard.
           - if:
               - condition: state
                 entity_id: binary_sensor.backyard_gate_contact
                 state: "off"
+              - condition: template
+                value_template: >
+                  {% set free = states('input_text.goat_gate_free_zones').split(',') | map('trim') | reject('eq','') | list %}
+                  {% set want = states('input_text.goat_zone_ids').split(',') | map('trim') | reject('eq','') | list %}
+                  {% set areas = states('input_select.goat_mow_mode').startswith('Areas') %}
+                  {% set gate_needed = not (areas and want | count > 0 and want | reject('in', free) | list | count == 0) %}
+                  {{ gate_needed }}
             then:
               - action: notify.house_phones
                 data:
                   title: Backyard gate still closed
                   message: >
                     Mowing starts in 5 minutes and the backyard gate is closed.
-                    The mower cannot reach the front zones — open the gate now.
+                    The mower cannot reach zones beyond the backyard — open the
+                    gate now.
                   data:
                     push:
                       sound:
