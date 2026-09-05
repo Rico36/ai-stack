@@ -12,7 +12,7 @@ views:
             entities:
               - entity: input_boolean.goat_automation_enabled
                 name: GOAT Automation Enabled
-              - entity: lawn_mower.goat_a3000_lidar
+              - entity: lawn_mower.goat_a3000_lidar_pro
                 name: GOAT Status
                 icon: mdi:robot-mower
               - type: section

@@ -186,7 +186,7 @@ reminder automations.
 | Rain accumulation sensor | `sensor.goat_rain_last_3_hours` | reminders only |
 
 Any soil moisture sensor works; only the entity ID matters. Every mower
-reference is `lawn_mower.goat_a3000_lidar` plus its `_error` and `_battery`
+reference is `lawn_mower.goat_a3000_lidar_pro` plus its `_error` and `_battery`
 sensors — rename your entities to match and no YAML edits are needed.
 
 ### Configuration — after deploying the package

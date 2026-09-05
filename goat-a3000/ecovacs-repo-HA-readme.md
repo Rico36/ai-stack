@@ -10,7 +10,7 @@ referenced in `validate-patches.sh` — adjust them if your setup differs.
 
 | Integration | Purpose | Entity used |
 |---|---|---|
-| Ecovacs (with deebot-client patches) | Mower control and state | `lawn_mower.goat_a3000_lidar` |
+| Ecovacs (with deebot-client patches) | Mower control and state | `lawn_mower.goat_a3000_lidar_pro` |
 | PirateWeather | Hourly rain forecast for 95-minute window | `weather.pirateweather` |
 | iOS Companion App | Push notifications (critical + regular) | `notify.house_phones` |
 | Alexa Media Player | Spoken pre-mow reminders | `notify.house_alexas` |

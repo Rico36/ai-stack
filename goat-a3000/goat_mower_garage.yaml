@@ -182,11 +182,11 @@ script:
     sequence:
       - service: lawn_mower.dock
         target:
-          entity_id: lawn_mower.goat_a3000_lidar
+          entity_id: lawn_mower.goat_a3000_lidar_pro
       - delay: "00:00:20"
       - service: lawn_mower.dock
         target:
-          entity_id: lawn_mower.goat_a3000_lidar
+          entity_id: lawn_mower.goat_a3000_lidar_pro
 
   goat_mowing_start:
     alias: GOAT - Mowing Start
@@ -198,8 +198,8 @@ script:
       - service: homeassistant.update_entity
         target:
           entity_id:
-            - sensor.goat_a3000_lidar_error
-            - lawn_mower.goat_a3000_lidar
+            - sensor.goat_a3000_lidar_pro_error
+            - lawn_mower.goat_a3000_lidar_pro
 
       - service: weather.get_forecasts
         target:
@@ -212,7 +212,7 @@ script:
           - conditions:
               - condition: template
                 value_template: >
-                  {{ states('sensor.goat_a3000_lidar_error') | int(0) == 0 }}
+                  {{ states('sensor.goat_a3000_lidar_pro_error') | int(0) == 0 }}
               - condition: template
                 value_template: >
                   {% set status = states('input_select.goat_grass_status') %}
@@ -273,7 +273,7 @@ script:
 
               - service: lawn_mower.start_mowing
                 target:
-                  entity_id: lawn_mower.goat_a3000_lidar
+                  entity_id: lawn_mower.goat_a3000_lidar_pro
 
               - service: script.goat_notify
                 data:
@@ -316,7 +316,7 @@ script:
                   Mowing cancelled — Grass Status is Wet ({{ moisture | round(1) }}% soil moisture). Will attempt a makeup mow when conditions clear.
                 {% elif status != 'Dry' and moisture >= 55 %}
                   Mowing cancelled — grass is too wet ({{ moisture | round(1) }}%). Will attempt a makeup mow when conditions clear.
-                {% elif states('sensor.goat_a3000_lidar_error') | int(0) != 0 %}
+                {% elif states('sensor.goat_a3000_lidar_pro_error') | int(0) != 0 %}
                   Mowing cancelled — mower has an active error. Will attempt a makeup mow when resolved.
                 {% else %}
                   Mowing cancelled — rain forecast in next 95 minutes. Will attempt a makeup mow when conditions clear.
@@ -335,7 +335,7 @@ script:
 
       - variables:
           soil_moisture: "{{ states('sensor.front_rain_sensor_soil_moisture') | float(100) }}"
-          mower_error: "{{ states('sensor.goat_a3000_lidar_error') | int(0) }}"
+          mower_error: "{{ states('sensor.goat_a3000_lidar_pro_error') | int(0) }}"
 
       - variables:
           forecast_slots: >
@@ -401,8 +401,8 @@ script:
       - service: homeassistant.update_entity
         target:
           entity_id:
-            - sensor.goat_a3000_lidar_error
-            - lawn_mower.goat_a3000_lidar
+            - sensor.goat_a3000_lidar_pro_error
+            - lawn_mower.goat_a3000_lidar_pro
 
       - service: weather.get_forecasts
         target:
@@ -415,7 +415,7 @@ script:
           - conditions:
               - condition: template
                 value_template: >
-                  {{ states('sensor.goat_a3000_lidar_error') | int(0) == 0 }}
+                  {{ states('sensor.goat_a3000_lidar_pro_error') | int(0) == 0 }}
               - condition: template
                 value_template: >
                   {% set status = states('input_select.goat_grass_status') %}
@@ -476,7 +476,7 @@ script:
 
               - service: lawn_mower.start_mowing
                 target:
-                  entity_id: lawn_mower.goat_a3000_lidar
+                  entity_id: lawn_mower.goat_a3000_lidar_pro
 
               - service: script.goat_notify
                 data:
@@ -515,7 +515,7 @@ script:
                   Mowing cancelled — Grass Status is Wet ({{ moisture | round(1) }}% soil moisture).
                 {% elif status != 'Dry' and moisture >= 55 %}
                   Mowing cancelled — grass is too wet (soil moisture {{ moisture | round(1) }}%).
-                {% elif states('sensor.goat_a3000_lidar_error') | int(0) != 0 %}
+                {% elif states('sensor.goat_a3000_lidar_pro_error') | int(0) != 0 %}
                   Mowing cancelled — mower has an active error.
                 {% else %}
                   Mowing cancelled — rain forecast in next 95 minutes.
@@ -575,7 +575,7 @@ automation:
     mode: single
     trigger:
       - platform: state
-        entity_id: lawn_mower.goat_a3000_lidar
+        entity_id: lawn_mower.goat_a3000_lidar_pro
         from: "docked"
         to: "mowing"
     condition:
@@ -595,7 +595,7 @@ automation:
       # garage door while the forecast is fetched and evaluated.
       - service: lawn_mower.pause
         target:
-          entity_id: lawn_mower.goat_a3000_lidar
+          entity_id: lawn_mower.goat_a3000_lidar_pro
 
       - service: weather.get_forecasts
         target:
@@ -668,21 +668,21 @@ automation:
           # resuming: start_mowing only converts to RESUME when HA's last
           # known state is paused, otherwise it sends a plain start that the
           # mower silently ignores mid-task.
-          - wait_template: "{{ is_state('lawn_mower.goat_a3000_lidar', 'paused') }}"
+          - wait_template: "{{ is_state('lawn_mower.goat_a3000_lidar_pro', 'paused') }}"
             timeout: "00:00:30"
             continue_on_timeout: true
 
           # start_mowing converts to RESUME while paused (patched clean.py)
           - service: lawn_mower.start_mowing
             target:
-              entity_id: lawn_mower.goat_a3000_lidar
+              entity_id: lawn_mower.goat_a3000_lidar_pro
 
           - service: script.goat_notify
             data:
               title: "{{ 'Mowing resumed after recharge' if resuming else 'Manual mowing session detected' }}"
               message: >
                 {% if resuming %}
-                  Battery at {{ states('sensor.goat_a3000_lidar_battery') }}% —
+                  Battery at {{ states('sensor.goat_a3000_lidar_pro_battery') }}% —
                   mower resumed its run.
                 {% else %}
                   Mower started outside of schedule — automation sequence
@@ -702,7 +702,7 @@ automation:
 
     trigger:
       - platform: state
-        entity_id: lawn_mower.goat_a3000_lidar
+        entity_id: lawn_mower.goat_a3000_lidar_pro
         to: "paused"
         for:
           minutes: 5
@@ -719,7 +719,7 @@ automation:
       - condition: not
         conditions:
           - condition: state
-            entity_id: lawn_mower.goat_a3000_lidar
+            entity_id: lawn_mower.goat_a3000_lidar_pro
             state: "docked"
 
     action:
@@ -731,7 +731,7 @@ automation:
 
       - service: lawn_mower.dock
         target:
-          entity_id: lawn_mower.goat_a3000_lidar
+          entity_id: lawn_mower.goat_a3000_lidar_pro
 
 
   - alias: GOAT - Mower Returning
@@ -739,7 +739,7 @@ automation:
     mode: single
     trigger:
       - platform: state
-        entity_id: lawn_mower.goat_a3000_lidar
+        entity_id: lawn_mower.goat_a3000_lidar_pro
         to: "returning"
 
     condition:
@@ -772,7 +772,7 @@ automation:
     mode: single
     trigger:
       - platform: state
-        entity_id: lawn_mower.goat_a3000_lidar
+        entity_id: lawn_mower.goat_a3000_lidar_pro
         to: "mowing"
     condition:
       - condition: state
@@ -795,7 +795,7 @@ automation:
     mode: single
     trigger:
       - platform: template
-        value_template: "{{ states('sensor.goat_a3000_lidar_error') | int(0) != 0 }}"
+        value_template: "{{ states('sensor.goat_a3000_lidar_pro_error') | int(0) != 0 }}"
     condition:
       - condition: state
         entity_id: input_boolean.goat_automation_enabled
@@ -809,7 +809,7 @@ automation:
             entity_id: input_boolean.goat_mowing_session_active
             state: "on"
           - condition: state
-            entity_id: lawn_mower.goat_a3000_lidar
+            entity_id: lawn_mower.goat_a3000_lidar_pro
             state:
               - "mowing"
               - "paused"
@@ -828,7 +828,7 @@ automation:
     mode: single
     trigger:
       - platform: state
-        entity_id: lawn_mower.goat_a3000_lidar
+        entity_id: lawn_mower.goat_a3000_lidar_pro
         from:
           - "mowing"
           - "paused"
@@ -882,7 +882,7 @@ automation:
               message: >
                 Mower docked without a work-complete signal — treating as a
                 recharge break at
-                {{ states('sensor.goat_a3000_lidar_battery') }}% battery.
+                {{ states('sensor.goat_a3000_lidar_pro_battery') }}% battery.
                 Session stays active until it resumes.
 
   - alias: GOAT - Session Cleanup After Long Charge
@@ -894,7 +894,7 @@ automation:
     mode: single
     trigger:
       - platform: state
-        entity_id: lawn_mower.goat_a3000_lidar
+        entity_id: lawn_mower.goat_a3000_lidar_pro
         to: "docked"
         for: "03:00:00"
     condition:
@@ -945,7 +945,7 @@ automation:
       - condition: not
         conditions:
           - condition: state
-            entity_id: lawn_mower.goat_a3000_lidar
+            entity_id: lawn_mower.goat_a3000_lidar_pro
             state: "docked"
     action:
       - service: script.goat_notify
@@ -999,7 +999,7 @@ automation:
           - conditions:
               - condition: template
                 value_template: >
-                  {{ states('sensor.goat_a3000_lidar_error') | int(0) == 0 }}
+                  {{ states('sensor.goat_a3000_lidar_pro_error') | int(0) == 0 }}
               - condition: template
                 value_template: >
                   {% set status = states('input_select.goat_grass_status') %}
@@ -1058,7 +1058,7 @@ automation:
 
               - service: lawn_mower.start_mowing
                 target:
-                  entity_id: lawn_mower.goat_a3000_lidar
+                  entity_id: lawn_mower.goat_a3000_lidar_pro
 
               - service: script.goat_notify
                 data:
@@ -1083,7 +1083,7 @@ automation:
                       Makeup mow pending — Grass Status is Wet ({{ moisture | round(1) }}%). Will retry hourly until 7 pm.
                     {% elif status != 'Dry' and moisture >= 55 %}
                       Makeup mow pending — grass too wet ({{ moisture | round(1) }}%). Will retry hourly until 7 pm.
-                    {% elif states('sensor.goat_a3000_lidar_error') | int(0) != 0 %}
+                    {% elif states('sensor.goat_a3000_lidar_pro_error') | int(0) != 0 %}
                       Makeup mow pending — mower has an active error. Will retry hourly until 7 pm.
                     {% else %}
                       Makeup mow pending — rain forecast. Will retry hourly until 7 pm.
@@ -1374,7 +1374,7 @@ automation:
                 value_template: >
                   {% set grass_wet = is_state('input_select.goat_grass_status', 'Wet') %}
                   {% set rain_history = states('sensor.goat_rain_last_3_hours') | float(0) > 0 %}
-                  {% set mower_error = states('sensor.goat_a3000_lidar_error') | int(0) != 0 %}
+                  {% set mower_error = states('sensor.goat_a3000_lidar_pro_error') | int(0) != 0 %}
                   {% set start = today_at(states('input_datetime.goat_mowing_start_time')) %}
                   {% set end = start + timedelta(minutes=95) %}
                   {% set ns = namespace(block=false) %}
@@ -1398,7 +1398,7 @@ automation:
                       Mowing cancelled — grass status is Wet.
                     {% elif states('sensor.goat_rain_last_3_hours') | float(0) > 0 %}
                       Mowing cancelled — grass is wet (rain detected in past 3 hours).
-                    {% elif states('sensor.goat_a3000_lidar_error') | int(0) != 0 %}
+                    {% elif states('sensor.goat_a3000_lidar_pro_error') | int(0) != 0 %}
                       Mowing cancelled — mower has an active error.
                     {% else %}
                       Mowing cancelled — rain forecast in next 95 minutes.
@@ -1472,7 +1472,7 @@ automation:
                 value_template: >
                   {% set grass_wet = is_state('input_select.goat_grass_status', 'Wet') %}
                   {% set rain_history = states('sensor.goat_rain_last_3_hours') | float(0) > 0 %}
-                  {% set mower_error = states('sensor.goat_a3000_lidar_error') | int(0) != 0 %}
+                  {% set mower_error = states('sensor.goat_a3000_lidar_pro_error') | int(0) != 0 %}
                   {% set start = today_at(states('input_datetime.goat_mowing_start_time')) %}
                   {% set end = start + timedelta(minutes=95) %}
                   {% set ns = namespace(block=false) %}
@@ -1496,7 +1496,7 @@ automation:
                       Mowing cancelled — grass status is Wet.
                     {% elif states('sensor.goat_rain_last_3_hours') | float(0) > 0 %}
                       Mowing cancelled — grass is wet (rain detected in past 3 hours).
-                    {% elif states('sensor.goat_a3000_lidar_error') | int(0) != 0 %}
+                    {% elif states('sensor.goat_a3000_lidar_pro_error') | int(0) != 0 %}
                       Mowing cancelled — mower has an active error.
                     {% else %}
                       Mowing cancelled — rain forecast in next 95 minutes.
