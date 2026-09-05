@@ -146,7 +146,7 @@ shell_command:
   goat_write_zones: "python3 -c \"open('/tmp/goat_zones', 'w').write('{{ states(\"input_text.goat_zone_ids\") }}')\""
   # Prints 1 if the patched deebot_client wrote the workComplete marker
   # within the last 20 minutes (run genuinely finished), else 0. Used by
-  # GOAT - Close Garage When Docked to tell end-of-run docks from mid-run
+  # GOAT - Session End On Dock to tell end-of-run docks from mid-run
   # recharge docks. The marker is written by the vendored clean.py patch.
   goat_check_work_complete: >-
     /bin/sh -c 'f=/tmp/goat_work_complete;
@@ -281,7 +281,7 @@ script:
                   message: >
                     Mowing started on schedule.
                     Mode: {{ states('input_select.goat_mow_mode') }}.
-                    Garage opened.
+                    Zones: {{ states('input_text.goat_zone_ids') }}.
 
         default:
           - service: input_boolean.turn_off
@@ -480,11 +480,11 @@ script:
 
               - service: script.goat_notify
                 data:
-                  title: "Garage opened for mower."
+                  title: "Manual mowing started"
                   message: >
                     Mower started manually.
                     Mode: {{ states('input_select.goat_mow_mode') }}.
-                    Garage opened.
+                    Zones: {{ states('input_text.goat_zone_ids') }}.
 
         default:
           - service: input_boolean.turn_off
@@ -568,10 +568,10 @@ automation:
       Unified handler for every departure HA did not initiate itself:
       app/physical-button starts (session off) and self-resumes after a
       mid-run recharge (session on). HA-initiated starts are excluded by
-      the departure-window condition — their scripts open the garage
-      before sending start_mowing. Pause first, decide second: halt the
-      mower immediately, then weather-check; rain docks it, clear weather
-      authorizes the session, opens the garage, and resumes.
+      the departure-window condition, which their scripts set before
+      sending start_mowing. Pause first, decide second: halt the mower
+      immediately, then weather-check; rain docks it, clear weather
+      authorizes the session and resumes.
     mode: single
     trigger:
       - platform: state
@@ -591,8 +591,8 @@ automation:
           resuming: "{{ is_state('input_boolean.goat_mowing_session_active', 'on') }}"
 
       # Pause first, decide second: halt the mower immediately (single MQTT
-      # command, no cloud API wait) so it never races HA to the closed
-      # garage door while the forecast is fetched and evaluated.
+      # command, no cloud API wait) so it is not out mowing wet grass while
+      # the forecast is fetched and evaluated.
       - service: lawn_mower.pause
         target:
           entity_id: lawn_mower.goat_a3000_lidar_pro
@@ -951,7 +951,7 @@ automation:
       - service: script.goat_notify
         data:
           title: "Mower not docked"
-          message: "The robot mower has not reported docked status within 2 hours of scheduled mowing start. Check mower and garage."
+          message: "The robot mower has not reported docked status within 2 hours of scheduled mowing start. Check on it."
           critical: true
 
   - alias: GOAT - Makeup Day Check
