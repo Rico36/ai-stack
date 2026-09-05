@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 
 from deebot_client.events import StateEvent
@@ -9,6 +10,7 @@ from deebot_client.logging_filter import get_logger
 from deebot_client.message import HandlingResult, MessageBodyDataDict
 from deebot_client.models import ApiDeviceInfo, CleanAction, CleanMode, State
 
+from .charge import Charge
 from .common import ExecuteCommand, JsonCommandWithMessageHandling
 
 if TYPE_CHECKING:
@@ -237,3 +239,35 @@ class CleanMowerArea(CleanMower):
             except OSError:
                 pass
         return super()._get_args(action)
+
+
+class CleanMowerEndAndCharge(Charge):
+    """Dock command that ends the running task first.
+
+    Plain `charge` (act: go) sends the mower home but leaves the task
+    suspended: the Ecovacs app keeps offering END / Continue, the mower can
+    auto-resume once charged, and `workComplete` never fires — so HA cannot
+    tell the dock apart from a mid-run recharge.
+
+    HA's lawn_mower platform exposes no stop service, so its Dock button is
+    the only terminal control available. Wire this class to the hardware
+    profile's `charge` capability and Dock in HA means "end the run and go
+    home". Pause / Continue from the Ecovacs app are untouched and still
+    resume normally.
+    """
+
+    async def _execute(
+        self,
+        authenticator: Authenticator,
+        device_info: ApiDeviceInfo,
+        event_bus: EventBus,
+    ) -> tuple[HandlingResult, dict[str, Any]]:
+        """End the task, then return to the dock."""
+        # execute() is @final and swallows its own errors, so a failed stop
+        # never blocks the charge that follows.
+        await CleanMower(CleanAction.STOP).execute(
+            authenticator, device_info, event_bus
+        )
+        # Give the mower a moment to register the stop before sending it home
+        await asyncio.sleep(2)
+        return await super()._execute(authenticator, device_info, event_bus)
