@@ -23,6 +23,9 @@ views:
                 name: Mow Mode
               - entity: input_text.goat_zone_ids
                 name: Zone IDs (Map to Areas)
+              - entity: input_text.goat_gate_free_zones
+                name: Zones Not Needing Gate
+                icon: mdi:gate
           - type: grid
             columns: 7
             square: true
@@ -190,18 +193,22 @@ views:
               - type: custom:template-entity-row
                 name: Start Mowing Now
                 icon: >
-                  {% if is_state('input_boolean.goat_mowing_session_active', 'on') %}
+                  {% if is_state('input_boolean.goat_mowing_session_active',
+                  'on') %}
                     mdi:robot-mower
                   {% else %}
                     mdi:play-circle
                   {% endif %}
                 active: >
-                  {{ is_state('input_boolean.goat_mowing_session_active', 'on') or
+                  {{ is_state('input_boolean.goat_mowing_session_active', 'on')
+                  or
                      is_state('input_boolean.goat_departure_window_active', 'on') }}
                 state: >
-                  {% if is_state('input_boolean.goat_mowing_session_active', 'on') %}
+                  {% if is_state('input_boolean.goat_mowing_session_active',
+                  'on') %}
                     Mowing Active
-                  {% elif is_state('input_boolean.goat_departure_window_active', 'on') %}
+                  {% elif is_state('input_boolean.goat_departure_window_active',
+                  'on') %}
                     Starting…
                   {% else %}
                     Tap to start
@@ -218,23 +225,46 @@ views:
                 name: Active Flags
                 icon: mdi:flag-outline
                 state: >
-                  {% set o = is_state('input_boolean.goat_grass_status_override', 'on') %}
-                  {% set d = is_state('input_boolean.goat_delta_rule_active', 'on') %}
-                  {% if o and d %}Override + Delta
-                  {% elif o %}Override
-                  {% elif d %}Delta
-                  {% else %}—
-                  {% endif %}
+                  {% set o =
+                  is_state('input_boolean.goat_grass_status_override', 'on') %}
+                  {% set d = is_state('input_boolean.goat_delta_rule_active',
+                  'on') %} {% if o and d %}Override + Delta {% elif o %}Override
+                  {% elif d %}Delta {% else %}— {% endif %}
               - entity: sensor.front_rain_sensor_soil_moisture
                 name: Soil Moisture
                 icon: mdi:water-percent
               - entity: sensor.lawn_back_soil_moisture
                 name: Back Soil Moisture
+              - entity: input_number.goat_moisture_baseline
+                name: Last Dry Baseline
+              - type: section
+                label: Yard Access
+              - type: custom:template-entity-row
+                name: Backyard Gate
+                icon: >
+                  {% if is_state('binary_sensor.backyard_gate_contact', 'on') %}
+                    mdi:gate-open
+                  {% else %}
+                    mdi:gate
+                  {% endif %}
+                active: "{{ is_state('binary_sensor.backyard_gate_contact', 'on') }}"
+                state: >
+                  {% set open = is_state('binary_sensor.backyard_gate_contact',
+                  'on') %} {% set free =
+                  states('input_text.goat_gate_free_zones').split(',') |
+                  map('trim') | reject('eq','') | list %} {% set want =
+                  states('input_text.goat_zone_ids').split(',') | map('trim') |
+                  reject('eq','') | list %} {% set areas =
+                  states('input_select.goat_mow_mode').startswith('Areas') %} {%
+                  set needed = not (areas and want | count > 0 and want |
+                  reject('in', free) | list | count == 0) %} {% if open %}Open
+                  {% elif needed %}Closed — front zones blocked {% else %}Closed
+                  — not needed today {% endif %}
               - type: section
                 label: Session Status
               - type: custom:template-entity-row
-                name: Departure Window Active
-                icon: mdi:garage-alert
+                name: HA Start In Progress
+                icon: mdi:exit-run
                 state: >
                   {% if is_state('input_boolean.goat_departure_window_active',
                   'on') %}
@@ -271,9 +301,8 @@ views:
                 name: Last Decision
                 icon: mdi:clock-outline
                 state: >
-                  {% set dt =
-                  states('input_datetime.goat_last_mowing_decision') %} {% if dt
-                  not in ['unknown','unavailable',''] %}
+                  {% set dt = states('input_datetime.goat_last_mowing_decision')
+                  %} {% if dt not in ['unknown','unavailable',''] %}
                     {{ as_timestamp(dt) | timestamp_custom('%b %d %I:%M %p') }}
                     — {{ states('input_text.goat_last_mowing_status') }}
                   {% else %}
