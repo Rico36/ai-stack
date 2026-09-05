@@ -14,13 +14,14 @@ referenced in `validate-patches.sh` — adjust them if your setup differs.
 | PirateWeather | Hourly rain forecast for 95-minute window | `weather.pirateweather` |
 | iOS Companion App | Push notifications (critical + regular) | `notify.house_phones` |
 | Alexa Media Player | Spoken pre-mow reminders | `notify.house_alexas` |
-| Zigbee (ZHA or Zigbee2MQTT) | Connects the soil moisture sensor | — |
-| ESPHome — [Ratgdo32](https://ratcloud.llc/products/ratgdo32) | Garage door open/close control and state | `cover.garage_door` |
+| Zigbee (ZHA or Zigbee2MQTT) | Soil moisture sensor and the gate contact sensor | `binary_sensor.backyard_gate_contact` |
 
-> **Ratgdo32** is a Wi-Fi garage door controller that integrates with HA via ESPHome.
-> It wires directly to the garage door opener's safety terminals — no cloud required.
-> Any HA `cover` entity works as a drop-in replacement; update `cover.garage_door`
-> references in `goat_mower_garage.yaml` to match your entity name.
+> **The mower bases outdoors** in its own weather housing, so there is no
+> garage door in the loop. The backyard gate took its place as the physical
+> prerequisite for reaching the zones beyond the back lawn — HA can *read*
+> its contact sensor but not open it, so the pre-mow reminders are the whole
+> mechanism. If you have no such barrier, leave the sensor undefined or
+> delete the two reminder automations.
 
 > The Ecovacs integration requires the deebot-client patches in the `/patches` folder to
 > work correctly with the A3000. See the repo root README for install instructions —
@@ -41,10 +42,10 @@ Install both from HACS → Frontend before pasting the dashboard YAML.
 |---|---|
 | `sensor: platform: statistics` | 30-minute rolling **minimum** of soil moisture (`sensor.soil_moisture_30min_min`) — feeds the delta-spike rule |
 | `input_select` | Grass Status (Uncertain / Dry / Wet) and Mow Mode |
-| `input_boolean` | Session flags, schedule day toggles, garage tracking, override + delta flags |
+| `input_boolean` | Session flags, schedule day toggles, override + delta flags |
 | `input_number` | Dry baseline (`goat_moisture_baseline`) — the moisture level known to be dry |
 | `input_datetime` | Scheduled start time, session timestamps, override start time |
-| `input_text` | Zone IDs, last mowing status label |
+| `input_text` | Zone IDs, gate-free zone IDs, last mowing status label |
 | `shell_command` | Writes zone IDs to `/tmp/goat_zones` inside the HA container |
 
 External sensor referenced by the pre-mow reminders (define it to match your
@@ -156,8 +157,13 @@ same pre-check: Grass Status Wet, rain in the past 3 hours
 
 | Automation | When | If blocked | If clear |
 |---|---|---|---|
-| `GOAT - Mower Garage Reminder` | T−17 min | Phone push: "Robot Mower Kept Inside" + reason | Alexa announcement: set up the mower, remove the sensor cover, open the backyard gate |
-| `GOAT - Garage Door Reminder` | T−5 min | **Critical** phone push: "GOAT Kept Inside" + reason | Alexa announcement: garage opens automatically in 5 minutes |
+| `GOAT - Mowing Day Reminder` | T−17 min | Phone push: "Mowing Cancelled" + reason | Alexa: yard prep, sensor cover, and the gate **only if it is shut** |
+| `GOAT - Pre-Start Reminder` | T−5 min | **Critical** phone push: "Mowing Cancelled" + reason | Alexa announcement; escalates to a **critical** push if the gate is still shut |
+
+Both reminders are gate-aware. `input_text.goat_gate_free_zones` lists the
+zone IDs reachable without opening the gate — when every zone in the run is
+on that list (a back-lawn-only mow), neither reminder mentions the gate and
+the T−5 escalation stays silent. Full Map (Auto) always needs the gate.
 
 These are advisory — the authoritative go/no-go decision still happens in
 `goat_mowing_start` at start time (conditions can change in 17 minutes).
@@ -173,18 +179,17 @@ These are advisory — the authoritative go/no-go decision still happens in
      - If mode = **Areas** → `shell_command.goat_write_zones` writes zone IDs to `/tmp/goat_zones`
      - Turns on `goat_departure_window_active` + `goat_mowing_session_active`
      - Records `goat_mowing_session_started_at`
-     - Calls `goat_open_garage` (opens door, waits up to 1 min, sets `goat_garage_managed_open`)
      - Calls `lawn_mower.start_mowing` → CleanMowerArea reads zone file (or falls back to auto)
      - Notifies (regular)
 3. **Mower → mowing**
-   - `GOAT - Close Garage When Mowing Starts` fires (because `departure_window_active` = on) → waits 1 min → closes garage → turns off `departure_window_active`
+   - `GOAT - Clear Departure Window` fires (because `departure_window_active` = on) → waits 1 min → turns off `departure_window_active`
    - `GOAT - Departure Handler` does **not** fire — `departure_window_active` was on at the transition, condition fails
-4. **Mower → returning** — `GOAT - Open Garage When Returning` fires → opens garage, sets status "Returning", notifies (regular)
-5. **Mower → docked** — `GOAT - Close Garage When Docked` fires → waits 1 min → closes garage, then checks the workComplete marker (see "Mid-run recharge" below): run complete → turns off `mowing_session_active` + `goat_makeup_pending`, notifies (regular); no marker → recharge break, session stays active
+4. **Mower → returning** — `GOAT - Mower Returning` fires → sets status "Returning", notifies (regular)
+5. **Mower → docked** — `GOAT - Session End On Dock` checks the workComplete marker (see "Mid-run recharge" below): run complete → turns off `mowing_session_active` + `goat_makeup_pending`, notifies (regular); no marker → recharge break, session stays active
 6. **At session_started_at + 120 min** (fallback) — `GOAT - Not Docked Fallback Alert` fires only if still not docked → **critical** notify
 
 **If anything goes wrong mid-session:**
-- Error reported → `GOAT - Error After Mowing Started` → opens garage + tries dock → **critical** notify
+- Error reported → `GOAT - Error After Mowing Started` → tries dock → **critical** notify
 - Paused 5+ min → `GOAT - Paused Too Long Return To Dock` → docks → **critical** notify
 
 ---
@@ -202,25 +207,22 @@ These are advisory — the authoritative go/no-go decision still happens in
      - If mode = **Areas** → `shell_command.goat_write_zones` writes zone IDs to `/tmp/goat_zones`
      - Turns on `goat_departure_window_active` + `goat_mowing_session_active`
      - Records `goat_mowing_session_started_at`
-     - Calls `goat_open_garage`
      - Calls `lawn_mower.start_mowing` → mower starts immediately (no Ecovacs schedule needed)
      - Notifies "Scheduled mowing started" (regular)
 4. **Mower → mowing**
    - `GOAT - Departure Handler` does **not** fire — `departure_window_active` is on
-   - `GOAT - Close Garage When Mowing Starts` fires → waits 1 min → closes garage
+   - `GOAT - Clear Departure Window` fires → waits 1 min → clears the flag
 5. Steps 4–6 from Scenario 1 apply identically from here
 
 **Unauthorized start or recharge resume** (any `docked → mowing` transition HA
 did not initiate — app start, physical button, or the mower resuming a
 mid-run recharge on its own):
 - `GOAT - Departure Handler` fires (condition: `departure_window_active` = off)
-- **Pauses the mower immediately** (so it can't race HA to a closed garage
-  door), then checks the rain forecast
+- **Pauses the mower immediately**, then checks the rain forecast
 - Rain forecast → docks + **critical** notify "Mower stopped due to weather"
 - Clear → authorizes the session, stamps the session clock (re-arming the
-  95-min and 2-hour windows after a recharge), opens the garage, resumes
-  (start_mowing converts to RESUME while paused), notifies, closes the
-  garage after 1 min
+  95-min and 2-hour windows after a recharge), resumes (start_mowing
+  converts to RESUME while paused) and notifies
 
 **Mid-run recharge** (low battery, mower docks to charge, then resumes):
 - The mower only emits `workComplete` when a run truly finishes (~2 min
@@ -231,9 +233,9 @@ mid-run recharge on its own):
   been observed completing at 17%.
 - Dock **with** a fresh marker → run complete: session closed, "Mower
   docked" notification
-- Dock **without** a marker → recharge break: garage closes, session
-  stays active, "Mower recharging" notification; when the mower resumes,
-  the Departure Handler reopens the garage
+- Dock **without** a marker → recharge break: the session stays active
+  and you get a "Mower recharging" notification; when the mower resumes,
+  the Departure Handler runs the weather check again
 - Safety net: `GOAT - Session Cleanup After Long Charge` closes out any
   session still active after 3 hours docked
 
@@ -253,14 +255,13 @@ Triggered when a scheduled mow was cancelled and `goat_makeup_pending` = on.
      - If mode = **Areas** → writes zone file
      - Turns on `goat_departure_window_active` + `goat_mowing_session_active`
      - Records `goat_mowing_session_started_at`
-     - Calls `goat_open_garage`
      - Calls `lawn_mower.start_mowing`
      - Notifies "Makeup mow started" (regular)
 3. From here, steps 4–6 from Scenario 1 apply — including clearing `goat_makeup_pending` on dock
 
 **`goat_makeup_pending` lifecycle:**
 - Set on: scheduled mow cancelled by weather or Grass Status
-- Cleared: any mowing session ends with mower docked (`GOAT - Close Garage When Docked`)
+- Cleared: a run completes and the session closes (`GOAT - Session End On Dock`)
 - Also manually toggleable from the dashboard
 
 ---
