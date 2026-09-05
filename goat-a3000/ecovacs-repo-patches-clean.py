@@ -198,10 +198,15 @@ class CleanMower(CleanV2):
     def _get_args(self, action: CleanAction) -> dict[str, Any]:
         # GOAT LiDAR mowers use 'auto' type for all actions.
         # Sending empty string for pause/stop causes cloud error 20003.
-        # RESUME is the exception: it must match the running task's type
-        # (e.g. resuming a paused spotArea run with type auto is silently
-        # ignored), so echo the last type seen in getCleanInfo/onCleanInfo.
-        if action == CleanAction.RESUME and _LAST_TASK_TYPE:
+        # Every non-START action echoes the running task's type, matching
+        # what the Ecovacs app does. Two observations drive this:
+        #   - RESUME with type auto on a paused spotArea task returns
+        #     code 0 "ok" and is silently ignored (cr0e4u, 2026-07-25).
+        #   - PAUSE with type "" gets no reply at all, while the app's
+        #     PAUSE with type spotArea is accepted (51rcxt, 2026-09).
+        # START keeps type auto; CleanMowerArea overrides it with spotArea
+        # when a zone file is present.
+        if action != CleanAction.START and _LAST_TASK_TYPE:
             return {"act": action.value, "content": {"type": _LAST_TASK_TYPE}}
         return {"act": action.value, "content": {"type": "auto"}}
 
