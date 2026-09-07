@@ -1103,10 +1103,10 @@ automation:
       #                  missed both; 3 clears them with margin and still sits
       #                  above the ±0.5 jitter and 1.5–2 % / 30 min wobbles
       #                  seen in overnight traces. Watch for false spikes.)
-      #   Morning dew : 4–10 AM AND m > 51 (unconditional — overrides baseline)
-      #   High moisture: m > 79 AND m above the dry baseline
+      #   Morning dew : 4–10 AM AND m > baseline − 14 (overrides baseline)
+      #   High moisture: m > baseline + 14
       # Dry triggers:
-      #   Floor dry   : m < 55 AND not morning → always Dry, clears all flags
+      #   Floor dry   : m < baseline − 10 AND not morning → Dry, clears flags
       #   Delta cancel: delta_active AND m ≤ dry baseline + 1 → Dry, clear delta
       #   Normal dry  : m ≤ dry baseline
       # Dry baseline (input_number.goat_moisture_baseline, fallback 69 when 0):
@@ -1121,6 +1121,15 @@ automation:
       # Delta and morning are the two rules that override the baseline.
       # Delta spike is the only rule that can override a manual override.
       # Manual override auto-expires after 5 hours.
+      #
+      # ALL thresholds are OFFSETS from the dry baseline, never absolute
+      # percentages, so they track the sensor's actual range. Soil moisture
+      # drifts hugely with the season: this sensor read 60-65 % in July and
+      # 17-21 % by September. The old fixed numbers (55 / 51 / 79) failed
+      # silently — at 17 % every reading sat below the floor-dry threshold,
+      # so P1 fired on every update and cleared the delta flag, pinning
+      # Grass Status to Dry and making rain undetectable. The offsets below
+      # reproduce those old values at the old baseline of ~65.5.
       # ─────────────────────────────────────────────────────────────────────
       - variables:
           m: "{{ states('sensor.front_rain_sensor_soil_moisture') | float(0) }}"
@@ -1134,7 +1143,10 @@ automation:
           expired: "{{ is_state('input_boolean.goat_grass_status_override', 'on') and override_age > 18000 }}"
           morning: "{{ now().hour >= 4 and now().hour < 10 }}"
           spike: "{{ states('input_select.goat_grass_status') == 'Dry' and (m - min_30) > 3 }}"
-          dry_thresh: "{{ baseline if baseline > 0 else 69 }}"
+          # Uncalibrated fallback is the 30-min minimum — "the recent low is
+          # dry" — which is range-independent, unlike a fixed percentage. A
+          # manual Dry override replaces it with a real measurement.
+          dry_thresh: "{{ baseline if baseline > 0 else min_30 }}"
           # +1 tolerance: the spike stores the 30-min MINIMUM as the baseline,
           # so requiring an exact return would hang Wet whenever moisture
           # settles slightly above its recent low. Cancel writes the settled
@@ -1142,7 +1154,7 @@ automation:
           # correcting. Only the cancel rule gets the tolerance — normal dry
           # and high moisture still test the baseline exactly.
           cancel: "{{ delta_active and m <= dry_thresh + 1 }}"
-          floor_dry: "{{ m < 55 and not morning }}"
+          floor_dry: "{{ m < dry_thresh - 10 and not morning }}"
 
       # Clear expired override so rules below treat it as off
       - if:
@@ -1231,7 +1243,7 @@ automation:
           # normal dry (m ≤ baseline), or a delta cancel.
           - conditions:
               - condition: template
-                value_template: "{{ morning and m > 51 }}"
+                value_template: "{{ morning and m > dry_thresh - 14 }}"
             sequence:
               - service: input_select.select_option
                 target:
@@ -1239,11 +1251,10 @@ automation:
                 data:
                   option: "Wet"
 
-          # P7: High moisture — only above the dry baseline, so a manually
-          # established baseline higher than 79 still wins
+          # P7: High moisture — well above the dry baseline
           - conditions:
               - condition: template
-                value_template: "{{ m > 79 and m > dry_thresh }}"
+                value_template: "{{ m > dry_thresh + 14 }}"
             sequence:
               - service: input_select.select_option
                 target:

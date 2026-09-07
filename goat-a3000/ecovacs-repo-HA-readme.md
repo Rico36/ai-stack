@@ -79,23 +79,27 @@ matches wins:
 
 | # | Rule | Condition | Result |
 |---|---|---|---|
-| P1 | Floor dry | moisture < 55% AND not morning (4–10 AM) | **Dry** — clears delta + override; baseline untouched |
+| P1 | Floor dry | moisture < baseline − 10 AND not morning (4–10 AM) | **Dry** — clears delta + override; baseline untouched |
 | P2 | Delta spike | status was Dry AND moisture rose > 3% above its 30-min minimum | **Wet** — sets delta flag, stores the 30-min minimum as the dry baseline; the only rule that overrides a manual override |
 | P3 | Manual override hold | override flag on (and not expired) | status held as-is |
 | P4 | Delta cancellation | delta flag on AND moisture ≤ dry baseline **+ 1** | **Dry** — clears delta flag, stores the settled value as the new baseline |
 | P5 | Delta hold | delta flag on, moisture still above the baseline | held **Wet** |
-| P6 | Morning dew | 4–10 AM AND moisture > 51% | **Wet** — unconditional; morning and delta are the two rules that override the baseline |
-| P7 | High moisture | moisture > 79% AND above the dry baseline | **Wet** |
+| P6 | Morning dew | 4–10 AM AND moisture > baseline − 14 | **Wet** — unconditional; morning and delta are the two rules that override the baseline |
+| P7 | High moisture | moisture > baseline + 14 | **Wet** |
 | P8 | Normal dry | moisture ≤ dry baseline | **Dry** |
 
 If no rule matches, the last status holds ("Uncertain" if never set).
 
 ### The dry baseline (`goat_moisture_baseline`)
 
-The "dry baseline" is the moisture level known to be dry — **69%** by
-default (when the helper is 0/unset). It is never reset on a schedule,
-never set from an unvalidated reading, and only delta and morning outrank
-it. It changes three ways:
+The "dry baseline" is the moisture level known to be dry, and **every other
+threshold is an offset from it** rather than an absolute percentage — soil
+moisture drifts far too much with the season for fixed numbers to survive
+(this sensor read 60–65% in July and 17–21% by September). When the helper is
+unset the fallback is the 30-min rolling minimum, which is likewise
+range-independent. The baseline is never reset on a schedule, never set from
+an unvalidated reading, and only delta and morning outrank it. It changes
+three ways:
 
 - **Manual Dry** from the dashboard saves the current soil moisture as the
   baseline. Example: you set Dry at 76% → any reading ≤ 76% counts as Dry

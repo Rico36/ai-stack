@@ -116,14 +116,23 @@ Two `clean.py` findings worth keeping:
 
 | # | Rule | Condition | Result |
 |---|---|---|---|
-| P1 | Floor dry | m < 55 AND not morning | Dry, clears flags |
+| P1 | Floor dry | m < baseline **− 10** AND not morning | Dry, clears flags |
 | P2 | Delta spike | Dry AND m − 30-min-min > **3** | Wet; baseline ← 30-min min |
 | P3 | Override hold | override on, not expired | hold |
 | P4 | Delta cancel | delta on AND m ≤ baseline **+ 1** | Dry; baseline ← m |
 | P5 | Delta hold | delta on | hold Wet |
-| P6 | Morning dew | 4–10 AM AND m > 51 | Wet (unconditional) |
-| P7 | High moisture | m > 79 AND m > baseline | Wet |
-| P8 | Normal dry | m ≤ baseline (fallback 69) | Dry |
+| P6 | Morning dew | 4–10 AM AND m > baseline **− 14** | Wet (unconditional) |
+| P7 | High moisture | m > baseline **+ 14** | Wet |
+| P8 | Normal dry | m ≤ baseline | Dry |
+
+**All thresholds are offsets from the baseline, never absolute percentages.**
+Soil moisture drifts hugely with the season — this sensor read 60–65 % in
+July and 17–21 % by September. The original fixed numbers (55 / 51 / 79)
+failed silently at the low range: every reading sat below floor-dry, so P1
+fired on every update and cleared the delta flag, pinning Grass Status to Dry
+and making rain undetectable. The offsets reproduce the old values at the old
+baseline of ~65.5. Uncalibrated fallback for the baseline is the 30-min
+minimum, which is range-independent.
 
 **Dry baseline** (`input_number.goat_moisture_baseline`) is set **only** by
 manual Dry (current m) and delta scenarios; cleared by manual Wet. Never set
