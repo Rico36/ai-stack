@@ -52,8 +52,12 @@ input_boolean:
 input_select:
   goat_mow_mode:
     name: GOAT Mow Mode
+    # These strings must match the live HA options EXACTLY. input_select
+    # matches by string, so editing a label invalidates the current
+    # selection — and the mow scripts test startswith('Areas'), so an
+    # invalidated selection silently falls through to full-map mowing.
     options:
-      - "Areas (e.g., 3,2,6,4,7,5)"
+      - "Areas (3=Front, 2=Slide, 1=Back)"
       - "Full Map (Auto)"
     icon: mdi:map
 
