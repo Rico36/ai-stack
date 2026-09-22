@@ -92,6 +92,20 @@ input_number:
   # (threshold falls back to 69). Set by manual Dry override and by delta
   # scenarios (spike stores the 30-min pre-rain minimum; cancel stores the
   # settled value). Cleared by manual Wet override. Never auto-reset.
+  # Temperature compensation coefficient, in moisture-% per degree.
+  # compensated = raw + k * (soil_temp - 24h mean soil_temp)
+  # 0 disables compensation, so sensor.goat_soil_moisture_compensated simply
+  # mirrors the raw probe until this is tuned. Cooling raises this probe's
+  # reading, so k is positive. Raise it a little at a time and watch whether
+  # the daily sawtooth in the compensated trace flattens; overshooting
+  # inverts the curve (nights read too dry).
+  goat_temp_coefficient:
+    name: GOAT Temp Compensation Coefficient
+    min: 0
+    max: 3
+    step: 0.05
+    icon: mdi:thermometer-lines
+
   goat_moisture_baseline:
     name: GOAT Moisture Baseline
     min: 0
@@ -138,6 +152,41 @@ sensor:
     state_characteristic: value_min
     max_age:
       minutes: 30
+
+  # Rolling mean soil temperature, used as the compensation reference. A
+  # rolling mean rather than a fixed number keeps the compensated value
+  # centred on the same range as the raw probe, so the existing baseline
+  # logic keeps working and the reference drifts with the season on its own.
+  - platform: statistics
+    name: "GOAT Soil Temp 24h Mean"
+    unique_id: goat_soil_temp_24h_mean
+    entity_id: sensor.front_rain_sensor_temperature
+    state_characteristic: mean
+    max_age:
+      hours: 24
+
+template:
+  # Temperature-compensated soil moisture. OBSERVE ONLY for now — the rule
+  # chain still reads the raw probe. Once the coefficient is tuned and this
+  # trace looks flat across a day, switch the rules over by repointing
+  # `m` and the "Soil Moisture 30min Min" statistics sensor at this entity.
+  - sensor:
+      - name: "GOAT Soil Moisture Compensated"
+        unique_id: goat_soil_moisture_compensated
+        unit_of_measurement: "%"
+        state_class: measurement
+        state: >
+          {% set raw = states('sensor.front_rain_sensor_soil_moisture') %}
+          {% set temp = states('sensor.front_rain_sensor_temperature') %}
+          {% set ref = states('sensor.goat_soil_temp_24h_mean') %}
+          {% set k = states('input_number.goat_temp_coefficient') | float(0) %}
+          {% if not is_number(raw) %}
+            unavailable
+          {% elif k == 0 or not is_number(temp) or not is_number(ref) %}
+            {{ raw | float | round(2) }}
+          {% else %}
+            {{ (raw | float + k * (temp | float - ref | float)) | round(2) }}
+          {% endif %}
 
 shell_command:
   # Writes selected zone IDs to a temp file inside the container.
@@ -1098,11 +1147,24 @@ automation:
     action:
       # ── Grass Status thresholds — edit here only ──────────────────────────
       # Wet triggers (only these three):
-      #   Delta spike : m rose > 3 % above 30-min minimum AND status was Dry
-      #                 (two observed sprinkler events measured ~3.4, so 3.5
-      #                  missed both; 3 clears them with margin and still sits
-      #                  above the ±0.5 jitter and 1.5–2 % / 30 min wobbles
-      #                  seen in overnight traces. Watch for false spikes.)
+      #   Delta spike : m rose > 12 % above 30-min minimum AND status was Dry
+      #                 TEMPORARY VALUE — see below.
+      #
+      #   The probe turned out to be strongly temperature-sensitive: cooling
+      #   raises the reading. Measured Sept 20-21, with no rain:
+      #       clouds roll in  +5      7 AM warming step  +8
+      #       ~6 PM step      +9      sunset step       +10
+      #   versus a real rain event on Sept 12 of +14. At a threshold of 3 the
+      #   rule fired on thermal steps several times a day, and each one froze
+      #   the baseline at a level the sensor never returned to — one trap held
+      #   Wet for 19 hours. 12 clears every observed thermal excursion and
+      #   still catches that rain event, but with only 2 points of margin, so
+      #   a light shower will be missed.
+      #
+      #   This is a splint, not a fix. Once temperature compensation is tuned
+      #   (see input_number.goat_temp_coefficient below) the thermal swing
+      #   should collapse and this can go back to 3-6, which restores
+      #   light-rain and sprinkler sensitivity.
       #   Morning dew : 4–10 AM AND m > baseline − 14 (overrides baseline)
       #   High moisture: m > baseline + 14
       # Dry triggers:
@@ -1142,7 +1204,7 @@ automation:
             {{ (as_timestamp(now()) - as_timestamp(t)) | int(0) if t not in ['unknown','unavailable',''] else 0 }}
           expired: "{{ is_state('input_boolean.goat_grass_status_override', 'on') and override_age > 18000 }}"
           morning: "{{ now().hour >= 4 and now().hour < 10 }}"
-          spike: "{{ states('input_select.goat_grass_status') == 'Dry' and (m - min_30) > 3 }}"
+          spike: "{{ states('input_select.goat_grass_status') == 'Dry' and (m - min_30) > 12 }}"
           # Uncalibrated fallback is the 30-min minimum — "the recent low is
           # dry" — which is range-independent, unlike a fixed percentage. A
           # manual Dry override replaces it with a real measurement.

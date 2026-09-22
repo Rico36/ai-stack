@@ -231,12 +231,33 @@ views:
                   'on') %} {% if o and d %}Override + Delta {% elif o %}Override
                   {% elif d %}Delta {% else %}— {% endif %}
               - entity: sensor.front_rain_sensor_soil_moisture
-                name: Soil Moisture
+                name: Soil Moisture (raw)
                 icon: mdi:water-percent
               - entity: sensor.lawn_back_soil_moisture
                 name: Back Soil Moisture
               - entity: input_number.goat_moisture_baseline
                 name: Last Dry Baseline
+              - type: section
+                label: Temp Compensation (tuning)
+              - entity: sensor.front_rain_sensor_temperature
+                name: Soil Temperature
+                icon: mdi:thermometer
+              - entity: sensor.goat_soil_moisture_compensated
+                name: Soil Moisture (compensated)
+                icon: mdi:water-check
+              - entity: input_number.goat_temp_coefficient
+                name: Compensation k
+              - type: custom:template-entity-row
+                name: Raw − Compensated
+                icon: mdi:delta
+                state: >
+                  {% set r = states('sensor.front_rain_sensor_soil_moisture') %}
+                  {% set c = states('sensor.goat_soil_moisture_compensated') %}
+                  {% if is_number(r) and is_number(c) %}
+                    {{ (r | float - c | float) | round(2) }}%
+                  {% else %}
+                    —
+                  {% endif %}
               - type: section
                 label: Yard Access
               - type: custom:template-entity-row
