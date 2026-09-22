@@ -154,7 +154,7 @@ only a delta spike can override it.
 
 **input_select** — `goat_mow_mode`, `goat_grass_status` (Uncertain/Dry/Wet)
 
-`goat_mow_mode` options are **`"Areas (3=Front, 2=Slide, 1=Back)"`** and
+`goat_mow_mode` options are **`"Areas (3=Front, 2=Side, 1=Back)"`** and
 `"Full Map (Auto)"`. That first string must be reproduced exactly — HA matches
 input_select options by string, so changing the label invalidates the stored
 selection, and the mow scripts test `startswith('Areas')`, which means an

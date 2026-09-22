@@ -57,7 +57,7 @@ input_select:
     # selection — and the mow scripts test startswith('Areas'), so an
     # invalidated selection silently falls through to full-map mowing.
     options:
-      - "Areas (3=Front, 2=Slide, 1=Back)"
+      - "Areas (3=Front, 2=Side, 1=Back)"
       - "Full Map (Auto)"
     icon: mdi:map
 
