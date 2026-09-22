@@ -250,14 +250,7 @@ views:
               - type: custom:template-entity-row
                 name: Raw − Compensated
                 icon: mdi:delta
-                state: >
-                  {% set r = states('sensor.front_rain_sensor_soil_moisture') %}
-                  {% set c = states('sensor.goat_soil_moisture_compensated') %}
-                  {% if is_number(r) and is_number(c) %}
-                    {{ (r | float - c | float) | round(2) }}%
-                  {% else %}
-                    —
-                  {% endif %}
+                state: "{{ ((states('sensor.front_rain_sensor_soil_moisture') | float(0)) - (states('sensor.goat_soil_moisture_compensated') | float(0))) | round(2) }}%"
               - type: section
                 label: Yard Access
               - type: custom:template-entity-row
