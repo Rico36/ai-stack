@@ -108,6 +108,10 @@ input_number:
     min: 0
     max: 3
     step: 0.05
+    # box, not slider: as a slider on a touch dashboard this was nudged from
+    # 0 to nearly 3 by an accidental drag. Nothing in this package writes it,
+    # so the dashboard is the only way it can move.
+    mode: box
     icon: mdi:thermometer-lines
 
   goat_moisture_baseline:
@@ -116,6 +120,10 @@ input_number:
     max: 100
     step: 0.01
     unit_of_measurement: "%"
+    # box, not slider. Every threshold in the grass-status chain is an offset
+    # from this value, so an accidental drag on a phone silently moves the
+    # whole rule set. Deliberate edits should be typed, not swiped.
+    mode: box
     icon: mdi:water-percent
 
 input_text:
