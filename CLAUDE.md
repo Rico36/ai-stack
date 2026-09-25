@@ -188,6 +188,65 @@ escalates to a critical phone alert if it's still shut.
 
 ---
 
+## The soil probe — resolved Sept 2026, read before touching thresholds
+
+The probe was mounted with its **capacitive sensing electrodes above soil
+level**, in a mulch bed inches from a concrete walkway and under a shrub. The
+black sensing section has a "Minimum Depth Line" that must be fully buried;
+it wasn't. Electrodes sitting in mulch and air tracked air temperature and
+humidity instead of soil.
+
+That single fault produced essentially every anomaly chased for a week:
+seasonal "drift" from 65 % to 18 % to 58 %, sustained evening steps of +8 to
++10, delta baselines frozen at unreachable values, and a 19-hour false Wet
+that blocked a scheduled mow. Soil temperature read **70 → 116 °F** daily,
+tracking the sun with no lag — the clue that found it.
+
+After reseating the probe deeper and away from the concrete and drip line:
+
+| | Before | After |
+|---|---|---|
+| Soil temp range | 46 °F (70→116) | **18 °F (63.5→81.5)** |
+| Moisture shape | steps of +5 to +10, several per day | **smooth drainage curve** |
+| Moisture range | ~20 points | **~5 points / 22 h** |
+
+**Lesson worth keeping:** before tuning thresholds against a sensor, confirm
+the sensor is mounted correctly. Every rule tuned before this was calibrated
+against an artifact.
+
+---
+
+## Decision: delete the temperature-compensation scaffold
+
+`input_number.goat_temp_coefficient`, `sensor.goat_soil_moisture_compensated`
+and the dashboard "Raw − Compensated" row are to be **removed** in the next
+cleanup pass, not simplified. Left in place, dormant at k=0, only until then.
+
+Reasons:
+
+- Compensation solved a problem that turned out to be a mounting fault. With
+  the probe seated properly the fitted coefficient is ~0.05–0.1, about a
+  1-point effect — below the sensor's own noise and far below any threshold.
+- Operating the knob requires understanding capacitive sensor physics. The
+  owner reasonably does not, which makes it a control that cannot be used
+  safely. It has already caused harm: the slider drifted from 0 to nearly 3
+  by accidental drag (since fixed with `mode: box`).
+- "Raw − Compensated" is the wrong instrument anyway — tuning needs both
+  traces overlaid on a 24 h chart, not a single scalar.
+
+**Keep** `sensor.front_rain_sensor_temperature` and the 24 h mean, and keep
+temperature on the dashboard as a **health indicator**. A reading climbing
+back toward 100 °F+, or the daily swing widening sharply, is the early signal
+that the probe has been disturbed, heaved or pulled loose. That check needs no
+coefficient and no expertise — it is what found the fault the first time.
+
+If a genuine thermal signature ever appears (moisture cycling daily in step
+with temperature and *returning* to where it started, as distinct from rain's
+step up or drainage's one-way decline), rebuild compensation then, with data
+and a reason.
+
+---
+
 ## Open items
 
 - **Pro cutover**: entity renaming (38 refs — easiest is to reassign the old
