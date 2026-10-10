@@ -37,6 +37,37 @@ Files prefixed `ecovacs-repo-` are **staging copies** destined for the separate
 - Also on dashboard: `sensor.lawn_front_soil_moisture`, `sensor.lawn_back_soil_moisture`
 - External dependency referenced by reminders: `sensor.goat_rain_last_3_hours`
 
+### Notify groups — defined in `configuration.yaml`, NOT in the package
+
+The package calls `notify.house_phones` and `notify.house_alexas`, but both
+are legacy notify **groups** living in `/home/admin/homeassistant/configuration.yaml`
+(around line 18). They are not in `goat_mower_garage.yaml` — look there first
+next time rather than grepping the package.
+
+```yaml
+  - name: house_alexas
+    platform: group
+    services:
+      - service: alexa_media_alexa_upstairs
+      - service: alexa_media_ricky_s_fire_tv_cube
+      - service: alexa_media_kitchen_echo_spot
+
+  - platform: group
+    name: house_phones
+    services:
+      - service: mobile_app_iphone
+#      - service: mobile_app_victors_iphone
+```
+
+Notes:
+- Alexa Media Player registers `alexa_media_` + the `media_player` object_id,
+  so `media_player.kitchen_echo_spot` → `alexa_media_kitchen_echo_spot`.
+  Confirm a new name in Developer Tools → Actions before adding it.
+- **A bad member service makes the whole group fail silently** — none of the
+  devices speak, not just the broken one.
+- Legacy notify platforms have **no reload target**: editing these requires a
+  full HA restart, not a YAML reload.
+
 ### Zone IDs — Pro (`51rcxt`), confirmed Sept 2026
 
 | App area | Internal ID |
