@@ -231,26 +231,19 @@ views:
                   'on') %} {% if o and d %}Override + Delta {% elif o %}Override
                   {% elif d %}Delta {% else %}— {% endif %}
               - entity: sensor.front_rain_sensor_soil_moisture
-                name: Soil Moisture (raw)
+                name: Soil Moisture
                 icon: mdi:water-percent
               - entity: sensor.lawn_back_soil_moisture
                 name: Back Soil Moisture
               - entity: input_number.goat_moisture_baseline
                 name: Last Dry Baseline
-              - type: section
-                label: Temp Compensation (tuning)
+              # Probe health indicator, not a tuning input. A daily swing
+              # widening sharply, or readings climbing toward 100F+, means the
+              # probe has shifted or lifted out of the soil — the fault that
+              # caused the Sept 2026 false readings.
               - entity: sensor.front_rain_sensor_temperature
                 name: Soil Temperature
                 icon: mdi:thermometer
-              - entity: sensor.goat_soil_moisture_compensated
-                name: Soil Moisture (compensated)
-                icon: mdi:water-check
-              - entity: input_number.goat_temp_coefficient
-                name: Compensation k
-              - type: custom:template-entity-row
-                name: Raw − Compensated
-                icon: mdi:delta
-                state: "{{ ((states('sensor.front_rain_sensor_soil_moisture') | float(0)) - (states('sensor.goat_soil_moisture_compensated') | float(0))) | round(2) }}%"
               - type: section
                 label: Yard Access
               - type: custom:template-entity-row
